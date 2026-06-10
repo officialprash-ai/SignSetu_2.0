@@ -293,7 +293,7 @@ function GLBAvatar({
     applyPose(poseRef.current, B, alpha);
   });
 
-  return <primitive object={cloned} />;
+  return <primitive object={cloned} scale={0.55} position={[0, -1.0, 0]} />;
 }
 
 // ─── Bone animation ───────────────────────────────────────────────────────────
@@ -416,7 +416,7 @@ export function SignAvatar({
 }: SignAvatarProps) {
   return (
     <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden">
-      <Canvas camera={{ position: [0, 1.4, 3.0], fov: 44 }} gl={{ antialias: true }}>
+      <Canvas camera={{ position: [0, 0.6, 4.2], fov: 42 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
         <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
