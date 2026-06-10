@@ -1,7 +1,8 @@
-import { type RefObject, useEffect, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useRef, Component, type ReactNode } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, OrbitControls } from '@react-three/drei';
+import { Environment, OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 export interface GlossEntry {
   gloss: string;
@@ -19,241 +20,139 @@ export interface SignAvatarProps {
   onAnimationComplete?: () => void;
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 type JA = [number, number, number];
 
 interface HandShape {
-  fingers: [number, number, number, number];
-  thumb: number;
+  fingers: [number, number, number, number]; // index, middle, ring, pinky  0=open 1=closed
+  thumb: number;                             // 0=open 1=closed
   wristY?: number;
 }
 
 interface ArmPose {
-  upper: JA;
-  lower: JA;
-  wrist: JA;
+  upper: JA;   // upper arm rotation x,y,z
+  lower: JA;   // forearm rotation
+  wrist: JA;   // wrist rotation
   hand: HandShape;
 }
 
-interface FullPose {
-  L: ArmPose;
-  R: ArmPose;
-}
+interface FullPose { L: ArmPose; R: ArmPose; }
 
-const OPEN: HandShape  = { fingers: [0,   0,   0,   0  ], thumb: 0.5 };
-const FIST: HandShape  = { fingers: [1,   1,   1,   1  ], thumb: 0.3 };
+// ─── Preset hand shapes ───────────────────────────────────────────────────────
+const OPEN:  HandShape = { fingers:[0,   0,   0,   0  ], thumb:0.5 };
+const FIST:  HandShape = { fingers:[1,   1,   1,   1  ], thumb:0.3 };
+const INDEX: HandShape = { fingers:[1,   1,   1,   0  ], thumb:1   };
+const TWO:   HandShape = { fingers:[1,   1,   0,   0  ], thumb:1   };
+const CLAW:  HandShape = { fingers:[0.5, 0.5, 0.5, 0.5], thumb:0.3 };
+const PINCH: HandShape = { fingers:[0.5, 0.5, 0.5, 0.5], thumb:0.2 };
+const FLAT:  HandShape = { fingers:[0,   0,   0,   0  ], thumb:0.8 };
 
 const NEUTRAL: FullPose = {
   L: { upper:[0.05,0, 0.45], lower:[0,0,0], wrist:[0,0,0], hand:OPEN },
   R: { upper:[0.05,0,-0.45], lower:[0,0,0], wrist:[0,0,0], hand:OPEN },
 };
 
-const INDEX: HandShape = { fingers:[1,1,1,0], thumb:1 };
-const TWO:   HandShape = { fingers:[1,1,0,0], thumb:1 };
-const CLAW:  HandShape = { fingers:[0.5,0.5,0.5,0.5], thumb:0.3 };
-const PINCH: HandShape = { fingers:[0.5,0.5,0.5,0.5], thumb:0.2 };
-const FLAT:  HandShape = { fingers:[0,0,0,0], thumb:0.8 };
-
+// ─── Named sign poses ─────────────────────────────────────────────────────────
 const NAMED_POSES: Record<string, FullPose> = {
-  HELLO:    { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],     hand:OPEN },
-              R:{ upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0], hand:FLAT } },
-  HI:       { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],     hand:OPEN },
-              R:{ upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0], hand:FLAT } },
-  BYE:      { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],     hand:OPEN },
-              R:{ upper:[-1.1,0,-0.4], lower:[-0.3,0,0.2], wrist:[0.4,0.2,0], hand:OPEN } },
-  GOODBYE:  { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],     hand:OPEN },
-              R:{ upper:[-1.1,0,-0.4], lower:[-0.3,0,0.2], wrist:[0.4,0.2,0], hand:OPEN } },
-  'THANK-YOU': { L:{ upper:[0.4,0,0.3],  lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN },
-                 R:{ upper:[0.4,0,-0.3], lower:[-0.8,0,-0.2],wrist:[0,-0.3,0], hand:OPEN } },
-  THANK:    { L:{ upper:[0.4,0,0.3],  lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN },
-              R:{ upper:[0.4,0,-0.3], lower:[-0.8,0,-0.2],wrist:[0,-0.3,0], hand:OPEN } },
-  PLEASE:   { L:{ upper:[0.05,0,0.5], lower:[0.2,0,0],     wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.6,-0.1,-0.4],lower:[-0.5,0,0],  wrist:[0.2,0,0],  hand:FLAT } },
-  SORRY:    { L:{ upper:[0.6,0,0.2],  lower:[-0.7,0,0.1], wrist:[0.1,0,0],  hand:FIST },
-              R:{ upper:[0.6,0,-0.2], lower:[-0.7,0,-0.1],wrist:[0.1,0,0],  hand:FIST } },
-  WELCOME:  { L:{ upper:[0.05,0,0.5], lower:[0,0,0],       wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.6], lower:[-0.4,0,0.2],  wrist:[0,0,0],    hand:OPEN } },
-  EXCUSE:   { L:{ upper:[0.3,0,0.4],  lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.3,0,-0.4], lower:[-0.6,0,0],    wrist:[0.1,0,0],  hand:FLAT } },
-  I:        { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.5,0,-0.3],  lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST } },
-  ME:       { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.5,0,-0.3],  lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST } },
-  YOU:      { L:{ upper:[0.05,0,0.45], lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0,0.5,-0.5],  lower:[0,0,-0.3],   wrist:[0,0,0],    hand:INDEX } },
-  WE:       { L:{ upper:[-0.4,0,0.5], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:INDEX },
-              R:{ upper:[-0.4,0,-0.5],lower:[-0.3,0,-0.2],wrist:[0,0,0],    hand:INDEX } },
-  THEY:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.3,0,-0.7], lower:[0,0,-0.2],   wrist:[0,0,0],    hand:INDEX } },
-  WHAT:     { L:{ upper:[-0.8,0,0.3],  lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN },
-              R:{ upper:[-0.8,0,-0.3], lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN } },
-  WHERE:    { L:{ upper:[-0.8,0,0.3],  lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN },
-              R:{ upper:[-0.8,0,-0.3], lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN } },
-  WHY:      { L:{ upper:[-0.8,0,0.3],  lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN },
-              R:{ upper:[-1.0,0.1,-0.3],lower:[-0.5,0,0],  wrist:[0.2,0,0],  hand:CLAW } },
-  HOW:      { L:{ upper:[-0.6,0,0.3],  lower:[-0.4,0,0.2], wrist:[0.3,0,0],  hand:FIST },
-              R:{ upper:[-0.6,0,-0.3], lower:[-0.4,0,-0.2],wrist:[0.3,0,0],  hand:FIST } },
-  WHEN:     { L:{ upper:[0.2,0,0.4],   lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:INDEX },
-              R:{ upper:[0.2,0,-0.4],  lower:[-0.5,0,0],   wrist:[0,0,0],    hand:INDEX } },
-  WHO:      { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.8,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0],  hand:INDEX } },
-  YES:      { L:{ upper:[-1.5,0,0.2],  lower:[-0.4,0,0],   wrist:[0.2,0,0],  hand:OPEN },
-              R:{ upper:[-1.3,0,-0.3], lower:[-0.5,0,0],   wrist:[0.3,0,0],  hand:FIST } },
-  NO:       { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.1,0,-0.5],  lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:TWO  } },
-  OK:       { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.3,0,-0.4],  lower:[-0.4,0,0.2], wrist:[0,0.2,0],  hand:PINCH } },
-  KNOW:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.9,0.2,-0.4],lower:[-0.5,0.1,0.2],wrist:[0.1,0,0],hand:FLAT } },
-  UNDERSTAND:{ L:{ upper:[0.05,0,0.45], lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN },
-               R:{ upper:[-1.1,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX } },
-  THINK:    { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-1.0,0.2,-0.3],lower:[-0.4,0,0.1],wrist:[0.1,0,0],  hand:INDEX } },
-  LOVE:     { L:{ upper:[0.6,0,0.3],   lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:FIST },
-              R:{ upper:[0.6,0,-0.3],  lower:[-0.6,0,-0.1],wrist:[0.1,0,0],  hand:FIST } },
-  LIKE:     { L:{ upper:[0.5,0,0.3],   lower:[-0.5,0,0.1], wrist:[0.1,0,0],  hand:OPEN },
-              R:{ upper:[0.5,0,-0.3],  lower:[-0.7,0,0],   wrist:[0.2,0,0],  hand:PINCH } },
-  WANT:     { L:{ upper:[0.2,0,0.5],   lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:CLAW },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.4,0,-0.2],wrist:[0,0,0],    hand:CLAW } },
-  NEED:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0,0.3,-0.5],  lower:[-0.5,0,0],   wrist:[0.3,0,0],  hand:INDEX } },
-  HELP:     { L:{ upper:[0.3,0,0.4],   lower:[-0.5,0,0.2], wrist:[0,0,0],    hand:FIST },
-              R:{ upper:[0.3,0,-0.5],  lower:[-0.3,0,0],   wrist:[0,0,0],    hand:FLAT } },
-  WORK:     { L:{ upper:[0.2,0,0.4],   lower:[-0.5,0,0.2], wrist:[0.2,0,0],  hand:FIST },
-              R:{ upper:[0.2,0,-0.4],  lower:[-0.5,0,-0.2],wrist:[0.2,0,0],  hand:FIST } },
-  LEARN:    { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.7,0.1,-0.3],lower:[-0.5,0,0.2],wrist:[0.1,0,0],  hand:FLAT } },
-  GO:       { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0,0.2,-0.6],  lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:INDEX } },
-  COME:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.2,0,-0.5], lower:[-0.4,0,0.1], wrist:[0,0,0],    hand:INDEX } },
-  SEE:      { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.8,0.2,-0.4],lower:[-0.3,0,0.2],wrist:[0.1,0,0],  hand:TWO  } },
-  HEAR:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-1.1,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0,0,0],    hand:INDEX } },
-  TELL:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.8,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.1,0.1,0],hand:INDEX } },
-  GIVE:     { L:{ upper:[0.2,0,0.4],   lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FLAT },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.4,0,0],   wrist:[0,0,0],    hand:FLAT } },
-  WAIT:     { L:{ upper:[0.3,0,0.5],   lower:[-0.5,0,0.2], wrist:[0.2,0,0],  hand:OPEN },
-              R:{ upper:[0.3,0,-0.5],  lower:[-0.5,0,-0.2],wrist:[0.2,0,0],  hand:OPEN } },
-  STOP:     { L:{ upper:[0.2,0,0.5],   lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.6,0,0],   wrist:[0.3,0,0],  hand:FLAT } },
-  START:    { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.4,0,0.1], wrist:[0,0.5,0],  hand:INDEX } },
-  FINISH:   { L:{ upper:[0.2,0,0.4],   lower:[-0.4,0,0.2], wrist:[0.3,0,0],  hand:OPEN },
-              R:{ upper:[0.2,0,-0.4],  lower:[-0.4,0,-0.2],wrist:[0.3,0,0],  hand:OPEN } },
-  NAME:     { L:{ upper:[0.05,0,0.45], lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-1.0,0.2,-0.3],lower:[-0.6,0.1,0.2],wrist:[0.2,-0.2,0],hand:TWO } },
-  FAMILY:   { L:{ upper:[0.4,0,0.4],   lower:[-0.5,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.4,0,-0.4],  lower:[-0.5,0,-0.2],wrist:[0,0,0],    hand:OPEN } },
-  FRIEND:   { L:{ upper:[0.3,0,0.5],   lower:[-0.5,0,0.2], wrist:[0,0,0],    hand:INDEX },
-              R:{ upper:[0.3,0,-0.5],  lower:[-0.5,0,-0.2],wrist:[0,0,0],    hand:INDEX } },
-  HOME:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.8,0.1,-0.4],lower:[-0.4,0,0.2],wrist:[0.2,0,0],  hand:PINCH } },
-  SCHOOL:   { L:{ upper:[0.3,0,0.4],   lower:[-0.5,0,0.2], wrist:[0,0.3,0],  hand:OPEN },
-              R:{ upper:[0.3,0,-0.4],  lower:[-0.5,0,-0.2],wrist:[0,-0.3,0], hand:OPEN } },
-  FOOD:     { L:{ upper:[0.2,0,0.4],   lower:[-0.5,0,0.2], wrist:[0.1,0,0],  hand:OPEN },
-              R:{ upper:[-0.4,0,-0.3], lower:[-1.0,0,0],   wrist:[0.2,0,0],  hand:CLAW } },
-  WATER:    { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.8,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0],  hand:{ fingers:[1,0,0,0], thumb:1 } } },
-  MONEY:    { L:{ upper:[0.2,0,0.4],   lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.5,0,0],   wrist:[0,0,0],    hand:PINCH } },
-  TIME:     { L:{ upper:[0.2,0,0.5],   lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.4],  lower:[-0.5,0,0],   wrist:[0,0,0],    hand:INDEX } },
-  DAY:      { L:{ upper:[-0.3,0,0.8],  lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.3,0,-0.4], lower:[0,0,0],      wrist:[0,0,0],    hand:INDEX } },
-  TODAY:    { L:{ upper:[-0.3,0,0.8],  lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.3,0,-0.4], lower:[0,0,0],      wrist:[0,0,0],    hand:INDEX } },
-  NOW:      { L:{ upper:[0.2,0,0.5],   lower:[-0.6,0,0.2], wrist:[0.3,0,0],  hand:OPEN },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.6,0,-0.2],wrist:[0.3,0,0],  hand:OPEN } },
-  GOOD:     { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.4,0,-0.3],  lower:[-0.7,0,0.1], wrist:[0,0,0],    hand:FLAT } },
-  BAD:      { L:{ upper:[0.05,0,0.45], lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.4,0,-0.3],  lower:[-0.7,0,0.1], wrist:[0.3,0,0],  hand:FLAT } },
-  HAPPY:    { L:{ upper:[0.4,0,0.3],   lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:OPEN },
-              R:{ upper:[0.4,0,-0.3],  lower:[-0.6,0,-0.1],wrist:[0.1,0,0],  hand:OPEN } },
-  SAD:      { L:{ upper:[0.5,0,0.3],   lower:[-0.5,0,0.1], wrist:[0.2,0,0],  hand:OPEN },
-              R:{ upper:[0.5,0,-0.3],  lower:[-0.5,0,-0.1],wrist:[0.2,0,0],  hand:OPEN } },
-  BIG:      { L:{ upper:[0.1,0,0.6],   lower:[-0.4,0,0.3], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.1,0,-0.6],  lower:[-0.4,0,-0.3],wrist:[0,0,0],    hand:OPEN } },
-  SMALL:    { L:{ upper:[0.2,0,0.5],   lower:[-0.6,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[0.2,0,-0.5],  lower:[-0.6,0,-0.2],wrist:[0,0,0],    hand:OPEN } },
-  _pool0:   { L:{ upper:[-0.2,0,1.3],  lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:OPEN },
-              R:{ upper:[-0.2,0,-1.3], lower:[-0.3,0,-0.2],wrist:[0,0,0],    hand:OPEN } },
-  _pool1:   { L:{ upper:[-0.5,0,0.5],  lower:[-0.4,0,0.2], wrist:[0.2,0,0],  hand:FIST },
-              R:{ upper:[-0.5,0,-0.5], lower:[-0.4,0,-0.2],wrist:[0.2,0,0],  hand:FIST } },
-  _pool2:   { L:{ upper:[0.3,0,0.6],   lower:[-0.5,0,0.3], wrist:[0,0.2,0],  hand:OPEN },
-              R:{ upper:[0.3,0,-0.6],  lower:[-0.5,0,-0.3],wrist:[0,-0.2,0], hand:OPEN } },
-  _pool3:   { L:{ upper:[-0.8,0,0.4],  lower:[-0.3,0,0.2], wrist:[0.1,0,0],  hand:CLAW },
-              R:{ upper:[-0.8,0,-0.4], lower:[-0.3,0,-0.2],wrist:[0.1,0,0],  hand:CLAW } },
-  _pool4:   { L:{ upper:[0.6,0,0.3],   lower:[-0.4,0,0.1], wrist:[0,0.3,0],  hand:PINCH },
-              R:{ upper:[0.1,0,-0.5],  lower:[-0.6,0,0],   wrist:[0,-0.2,0], hand:INDEX } },
+  HELLO:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
+  HI:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
+  BYE:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.1,0,-0.4],lower:[-0.3,0,0.2], wrist:[0.4,0.2,0],hand:OPEN} },
+  GOODBYE:     { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.1,0,-0.4],lower:[-0.3,0,0.2], wrist:[0.4,0.2,0],hand:OPEN} },
+  'THANK-YOU': { L:{upper:[0.4,0,0.3], lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN},
+                 R:{upper:[0.4,0,-0.3],lower:[-0.8,0,-0.2], wrist:[0,-0.3,0], hand:OPEN} },
+  THANK:       { L:{upper:[0.4,0,0.3], lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN},
+                 R:{upper:[0.4,0,-0.3],lower:[-0.8,0,-0.2], wrist:[0,-0.3,0], hand:OPEN} },
+  PLEASE:      { L:{upper:[0.05,0,0.5],lower:[0.2,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.6,-0.1,-0.4],lower:[-0.5,0,0], wrist:[0.2,0,0],  hand:FLAT} },
+  SORRY:       { L:{upper:[0.6,0,0.2], lower:[-0.7,0,0.1], wrist:[0.1,0,0],  hand:FIST},
+                 R:{upper:[0.6,0,-0.2],lower:[-0.7,0,-0.1], wrist:[0.1,0,0],  hand:FIST} },
+  WELCOME:     { L:{upper:[0.05,0,0.5],lower:[0,0,0],       wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.2,0,-0.6],lower:[-0.4,0,0.2],  wrist:[0,0,0],    hand:OPEN} },
+  YES:         { L:{upper:[-1.5,0,0.2],lower:[-0.4,0,0],    wrist:[0.2,0,0],  hand:OPEN},
+                 R:{upper:[-1.3,0,-0.3],lower:[-0.5,0,0],   wrist:[0.3,0,0],  hand:FIST} },
+  NO:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.1,0,-0.5],lower:[-0.3,0,0.2],  wrist:[0,0,0],    hand:TWO } },
+  I:           { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.5,0,-0.3], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST} },
+  ME:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.5,0,-0.3], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST} },
+  YOU:         { L:{upper:[0.05,0,0.45],lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0,0.5,-0.5], lower:[0,0,-0.3],   wrist:[0,0,0],    hand:INDEX} },
+  LOVE:        { L:{upper:[0.6,0,0.3], lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:FIST},
+                 R:{upper:[0.6,0,-0.3],lower:[-0.6,0,-0.1], wrist:[0.1,0,0],  hand:FIST} },
+  GOOD:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.4,0,-0.3],lower:[-0.7,0,0.1],  wrist:[0,0,0],    hand:FLAT} },
+  BAD:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.4,0,-0.3],lower:[-0.7,0,0.1],  wrist:[0.3,0,0],  hand:FLAT} },
+  HAPPY:       { L:{upper:[0.4,0,0.3], lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:OPEN},
+                 R:{upper:[0.4,0,-0.3],lower:[-0.6,0,-0.1], wrist:[0.1,0,0],  hand:OPEN} },
+  HELP:        { L:{upper:[0.3,0,0.4], lower:[-0.5,0,0.2], wrist:[0,0,0],    hand:FIST},
+                 R:{upper:[0.3,0,-0.5],lower:[-0.3,0,0],    wrist:[0,0,0],    hand:FLAT} },
+  KNOW:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-0.9,0.2,-0.4],lower:[-0.5,0.1,0.2],wrist:[0.1,0,0],hand:FLAT} },
+  GO:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0,0.2,-0.6], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:INDEX} },
+  STOP:        { L:{upper:[0.2,0,0.5], lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.2,0,-0.5],lower:[-0.6,0,0],    wrist:[0.3,0,0],  hand:FLAT} },
+  WHAT:        { L:{upper:[-0.8,0,0.3],lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN},
+                 R:{upper:[-0.8,0,-0.3],lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN} },
+  WHERE:       { L:{upper:[-0.8,0,0.3],lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN},
+                 R:{upper:[-0.8,0,-0.3],lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN} },
+  HOW:         { L:{upper:[-0.6,0,0.3],lower:[-0.4,0,0.2], wrist:[0.3,0,0],  hand:FIST},
+                 R:{upper:[-0.6,0,-0.3],lower:[-0.4,0,-0.2],wrist:[0.3,0,0],  hand:FIST} },
+  WHO:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-0.8,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX} },
+  WORK:        { L:{upper:[0.2,0,0.4], lower:[-0.5,0,0.2], wrist:[0.2,0,0],  hand:FIST},
+                 R:{upper:[0.2,0,-0.4],lower:[-0.5,0,-0.2], wrist:[0.2,0,0],  hand:FIST} },
+  UNDERSTAND:  { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.1,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX} },
+  NAME:        { L:{upper:[0.05,0,0.45],lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-1.0,0.2,-0.3],lower:[-0.6,0.1,0.2],wrist:[0.2,-0.2,0],hand:TWO} },
+  // fallback pool
+  _p0: {L:{upper:[-0.2,0,1.3],lower:[-0.3,0,0.2],wrist:[0,0,0],hand:OPEN},R:{upper:[-0.2,0,-1.3],lower:[-0.3,0,-0.2],wrist:[0,0,0],hand:OPEN}},
+  _p1: {L:{upper:[-0.5,0,0.5],lower:[-0.4,0,0.2],wrist:[0.2,0,0],hand:FIST},R:{upper:[-0.5,0,-0.5],lower:[-0.4,0,-0.2],wrist:[0.2,0,0],hand:FIST}},
+  _p2: {L:{upper:[0.3,0,0.6],lower:[-0.5,0,0.3],wrist:[0,0.2,0],hand:OPEN},R:{upper:[0.3,0,-0.6],lower:[-0.5,0,-0.3],wrist:[0,-0.2,0],hand:OPEN}},
+  _p3: {L:{upper:[-0.8,0,0.4],lower:[-0.3,0,0.2],wrist:[0.1,0,0],hand:CLAW},R:{upper:[-0.8,0,-0.4],lower:[-0.3,0,-0.2],wrist:[0.1,0,0],hand:CLAW}},
 };
 
-const _POOL_KEYS = Object.keys(NAMED_POSES).filter(k => k.startsWith('_pool'));
-const _POOL: FullPose[] = _POOL_KEYS.map(k => NAMED_POSES[k]);
+const _POOL = Object.keys(NAMED_POSES).filter(k=>k.startsWith('_p')).map(k=>NAMED_POSES[k]);
 
-const FS_ARM: Pick<ArmPose, 'upper'|'lower'|'wrist'> = {
-  upper: [0.25, 0, -0.55],
-  lower: [-0.75, 0, 0],
-  wrist: [0, 0, 0],
-};
+// ─── Fingerspelling ───────────────────────────────────────────────────────────
+const FS_ARM: Pick<ArmPose,'upper'|'lower'|'wrist'> = { upper:[0.25,0,-0.55], lower:[-0.75,0,0], wrist:[0,0,0] };
 
 const LETTER_SHAPES: Record<string, HandShape> = {
-  A: { fingers:[1,1,1,1],    thumb:0.3 },
-  B: { fingers:[0,0,0,0],    thumb:1   },
-  C: { fingers:[0.4,0.4,0.4,0.4], thumb:0.4 },
-  D: { fingers:[1,1,1,0],    thumb:0.5 },
-  E: { fingers:[0.8,0.8,0.8,0.8], thumb:1 },
-  F: { fingers:[0,0,0,1],    thumb:0, wristY:0.2 },
-  G: { fingers:[1,1,1,0],    thumb:0, wristY:-0.6 },
-  H: { fingers:[1,1,0,0],    thumb:1, wristY:-0.6 },
-  I: { fingers:[0,1,1,1],    thumb:1   },
-  J: { fingers:[0,1,1,1],    thumb:1   },
-  K: { fingers:[1,1,0,0],    thumb:0.5 },
-  L: { fingers:[1,1,1,0],    thumb:0   },
-  M: { fingers:[0.5,0.5,0.5,0.5], thumb:1 },
-  N: { fingers:[1,0.5,0.5,0.5], thumb:1 },
-  O: { fingers:[0.5,0.5,0.5,0.5], thumb:0.3 },
-  P: { fingers:[1,1,0,0],    thumb:0.5, wristY:-0.3 },
-  Q: { fingers:[1,1,1,0],    thumb:0,   wristY:-0.4 },
-  R: { fingers:[1,1,0,0],    thumb:1   },
-  S: { fingers:[1,1,1,1],    thumb:0   },
-  T: { fingers:[1,1,1,1],    thumb:0.5 },
-  U: { fingers:[1,1,0,0],    thumb:1   },
-  V: { fingers:[1,1,0,0],    thumb:1, wristY:0.3 },
-  W: { fingers:[1,0,0,0],    thumb:1   },
-  X: { fingers:[1,1,1,0.6],  thumb:1   },
-  Y: { fingers:[0,1,1,1],    thumb:0   },
-  Z: { fingers:[1,1,1,0],    thumb:1   },
-  '0': { fingers:[0.5,0.5,0.5,0.5], thumb:0.3 },
-  '1': { fingers:[1,1,1,0],  thumb:1   },
-  '2': { fingers:[1,1,0,0],  thumb:1   },
-  '3': { fingers:[1,0,0,0],  thumb:0   },
-  '4': { fingers:[0,0,0,0],  thumb:1   },
-  '5': { fingers:[0,0,0,0],  thumb:0   },
-  '6': { fingers:[0,0,0,0.6],thumb:0.3 },
-  '7': { fingers:[0,0,0.6,0.6],thumb:0.3 },
-  '8': { fingers:[0,0.6,0.6,0.6],thumb:0.3 },
-  '9': { fingers:[0.6,0.6,0.6,0.6],thumb:0.3 },
+  A:{fingers:[1,1,1,1],thumb:0.3}, B:{fingers:[0,0,0,0],thumb:1},
+  C:{fingers:[0.4,0.4,0.4,0.4],thumb:0.4}, D:{fingers:[1,1,1,0],thumb:0.5},
+  E:{fingers:[0.8,0.8,0.8,0.8],thumb:1}, F:{fingers:[0,0,0,1],thumb:0,wristY:0.2},
+  G:{fingers:[1,1,1,0],thumb:0,wristY:-0.6}, H:{fingers:[1,1,0,0],thumb:1,wristY:-0.6},
+  I:{fingers:[0,1,1,1],thumb:1}, J:{fingers:[0,1,1,1],thumb:1},
+  K:{fingers:[1,1,0,0],thumb:0.5}, L:{fingers:[1,1,1,0],thumb:0},
+  M:{fingers:[0.5,0.5,0.5,0.5],thumb:1}, N:{fingers:[1,0.5,0.5,0.5],thumb:1},
+  O:{fingers:[0.5,0.5,0.5,0.5],thumb:0.3}, P:{fingers:[1,1,0,0],thumb:0.5,wristY:-0.3},
+  Q:{fingers:[1,1,1,0],thumb:0,wristY:-0.4}, R:{fingers:[1,1,0,0],thumb:1},
+  S:{fingers:[1,1,1,1],thumb:0}, T:{fingers:[1,1,1,1],thumb:0.5},
+  U:{fingers:[1,1,0,0],thumb:1}, V:{fingers:[1,1,0,0],thumb:1,wristY:0.3},
+  W:{fingers:[1,0,0,0],thumb:1}, X:{fingers:[1,1,1,0.6],thumb:1},
+  Y:{fingers:[0,1,1,1],thumb:0}, Z:{fingers:[1,1,1,0],thumb:1},
 };
 
 function getLetterPose(char: string): FullPose {
   const shape = LETTER_SHAPES[char.toUpperCase()] ?? LETTER_SHAPES.A;
-  return {
-    L: { ...NEUTRAL.L },
-    R: { ...FS_ARM, wrist: [0, shape.wristY ?? 0, 0], hand: shape },
-  };
+  return { L:{...NEUTRAL.L}, R:{...FS_ARM, wrist:[0,shape.wristY??0,0], hand:shape} };
 }
 
 function hashStr(s: string): number {
   let h = 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31,h) + s.charCodeAt(i))|0;
   return Math.abs(h);
 }
 
 function resolvePose(entry: GlossEntry): FullPose {
-  if (entry.fingerspell && entry.gloss.length === 1) return getLetterPose(entry.gloss);
+  if (entry.fingerspell && entry.gloss.length===1) return getLetterPose(entry.gloss);
   const g = entry.gloss.toUpperCase();
   if (NAMED_POSES[g]) return NAMED_POSES[g];
   for (const key of Object.keys(NAMED_POSES)) {
@@ -263,153 +162,92 @@ function resolvePose(entry: GlossEntry): FullPose {
   return _POOL[hashStr(g) % _POOL.length];
 }
 
-function lerpGroup(ref: RefObject<THREE.Group | null>, target: JA, a: number) {
-  if (!ref.current) return;
-  const r = ref.current.rotation;
-  r.x += (target[0] - r.x) * a;
-  r.y += (target[1] - r.y) * a;
-  r.z += (target[2] - r.z) * a;
+// ─── Bone name maps (Ready Player Me + Mixamo both supported) ─────────────────
+// Keys we look up on the skeleton; first match wins.
+const BONE_ALIASES: Record<string, string[]> = {
+  LeftArm:      ['LeftArm','Left_Arm','mixamorigLeftArm'],
+  RightArm:     ['RightArm','Right_Arm','mixamorigRightArm'],
+  LeftForeArm:  ['LeftForeArm','Left_ForeArm','mixamorigLeftForeArm'],
+  RightForeArm: ['RightForeArm','Right_ForeArm','mixamorigRightForeArm'],
+  LeftHand:     ['LeftHand','Left_Hand','mixamorigLeftHand'],
+  RightHand:    ['RightHand','Right_Hand','mixamorigRightHand'],
+
+  // Fingers (index, middle, ring, pinky) – proximal & mid phalanges
+  LI1:  ['LeftHandIndex1','mixamorigLeftHandIndex1'],
+  LI2:  ['LeftHandIndex2','mixamorigLeftHandIndex2'],
+  LM1:  ['LeftHandMiddle1','mixamorigLeftHandMiddle1'],
+  LM2:  ['LeftHandMiddle2','mixamorigLeftHandMiddle2'],
+  LR1:  ['LeftHandRing1','mixamorigLeftHandRing1'],
+  LR2:  ['LeftHandRing2','mixamorigLeftHandRing2'],
+  LP1:  ['LeftHandPinky1','mixamorigLeftHandPinky1'],
+  LP2:  ['LeftHandPinky2','mixamorigLeftHandPinky2'],
+
+  RI1:  ['RightHandIndex1','mixamorigRightHandIndex1'],
+  RI2:  ['RightHandIndex2','mixamorigRightHandIndex2'],
+  RM1:  ['RightHandMiddle1','mixamorigRightHandMiddle1'],
+  RM2:  ['RightHandMiddle2','mixamorigRightHandMiddle2'],
+  RR1:  ['RightHandRing1','mixamorigRightHandRing1'],
+  RR2:  ['RightHandRing2','mixamorigRightHandRing2'],
+  RP1:  ['RightHandPinky1','mixamorigRightHandPinky1'],
+  RP2:  ['RightHandPinky2','mixamorigRightHandPinky2'],
+
+  LT1:  ['LeftHandThumb1','mixamorigLeftHandThumb1'],
+  LT2:  ['LeftHandThumb2','mixamorigLeftHandThumb2'],
+  RT1:  ['RightHandThumb1','mixamorigRightHandThumb1'],
+  RT2:  ['RightHandThumb2','mixamorigRightHandThumb2'],
+
+  Spine: ['Spine','Spine1','mixamorigSpine'],
+  Head:  ['Head','mixamorigHead'],
+};
+
+function findBone(map: Map<string, THREE.Bone>, key: string): THREE.Bone | null {
+  const aliases = BONE_ALIASES[key] ?? [key];
+  for (const a of aliases) { const b = map.get(a); if (b) return b; }
+  return null;
 }
 
-function lerpGroupX(group: THREE.Group | null, target: number, a: number) {
-  if (!group) return;
-  group.rotation.x += (target - group.rotation.x) * a;
+function lerpBone(bone: THREE.Bone | null, tx: number, ty: number, tz: number, a: number) {
+  if (!bone) return;
+  bone.rotation.x += (tx - bone.rotation.x) * a;
+  bone.rotation.y += (ty - bone.rotation.y) * a;
+  bone.rotation.z += (tz - bone.rotation.z) * a;
 }
 
-// ─── Humanised Hand ────────────────────────────────────────────────────────────
-function HumanHand({
-  side,
-  fingerRefs,
-  midFingerRefs,
-  thumbRef,
-}: {
-  side: 'L' | 'R';
-  fingerRefs: React.MutableRefObject<(THREE.Group | null)[]>;
-  midFingerRefs: React.MutableRefObject<(THREE.Group | null)[]>;
-  thumbRef: React.MutableRefObject<THREE.Group | null>;
-}) {
-  const skin  = '#E8B89A';
-  const nail  = '#F2D5C8';
-  const s = side === 'L' ? 1 : -1;
-
-  // Finger x positions (index → pinky)
-  const FX = [-0.031, -0.010, 0.012, 0.032];
-  // Finger lengths (index longest, pinky shortest)
-  const FL = [0.052, 0.056, 0.052, 0.042];
-
-  return (
-    <group>
-      {/* Palm */}
-      <mesh position={[0, -0.04, 0]}>
-        <boxGeometry args={[0.088, 0.072, 0.022]} />
-        <meshStandardMaterial color={skin} roughness={0.55} />
-      </mesh>
-      {/* Knuckle ridge */}
-      <mesh position={[0, -0.01, 0.006]}>
-        <boxGeometry args={[0.092, 0.014, 0.018]} />
-        <meshStandardMaterial color={skin} roughness={0.5} />
-      </mesh>
-
-      {/* Fingers – 3 phalanges each */}
-      {FX.map((x, i) => {
-        const len = FL[i];
-        return (
-          <group
-            key={i}
-            ref={el => { fingerRefs.current[i] = el; }}
-            position={[x, -0.005, 0]}
-          >
-            {/* Proximal phalanx */}
-            <mesh position={[0, -len * 0.38, 0]}>
-              <capsuleGeometry args={[0.0095, len * 0.55, 4, 8]} />
-              <meshStandardMaterial color={skin} roughness={0.55} />
-            </mesh>
-            {/* Mid + distal pivot */}
-            <group
-              ref={el => { midFingerRefs.current[i] = el; }}
-              position={[0, -len * 0.74, 0]}
-            >
-              {/* Middle phalanx */}
-              <mesh position={[0, -len * 0.22, 0]}>
-                <capsuleGeometry args={[0.0082, len * 0.32, 4, 8]} />
-                <meshStandardMaterial color={skin} roughness={0.55} />
-              </mesh>
-              {/* Distal phalanx */}
-              <mesh position={[0, -len * 0.46, 0]}>
-                <capsuleGeometry args={[0.0072, len * 0.25, 4, 8]} />
-                <meshStandardMaterial color={skin} roughness={0.55} />
-              </mesh>
-              {/* Fingernail */}
-              <mesh position={[0, -len * 0.62, 0.007]}>
-                <boxGeometry args={[0.013, len * 0.22, 0.003]} />
-                <meshStandardMaterial color={nail} roughness={0.3} metalness={0.05} />
-              </mesh>
-            </group>
-          </group>
-        );
-      })}
-
-      {/* Thumb – 2 phalanges */}
-      <group
-        ref={thumbRef}
-        position={[s * -0.050, -0.052, 0.005]}
-        rotation={[0, 0, s * 0.82]}
-      >
-        {/* Proximal */}
-        <mesh position={[0, -0.018, 0]}>
-          <capsuleGeometry args={[0.011, 0.026, 4, 8]} />
-          <meshStandardMaterial color={skin} roughness={0.55} />
-        </mesh>
-        {/* Distal */}
-        <mesh position={[0, -0.040, 0]}>
-          <capsuleGeometry args={[0.010, 0.018, 4, 8]} />
-          <meshStandardMaterial color={skin} roughness={0.55} />
-        </mesh>
-        {/* Thumb nail */}
-        <mesh position={[0, -0.052, 0.008]}>
-          <boxGeometry args={[0.016, 0.016, 0.003]} />
-          <meshStandardMaterial color={nail} roughness={0.3} metalness={0.05} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-// ─── Main scene ───────────────────────────────────────────────────────────────
-function AvatarScene({
+// ─── GLB avatar scene ─────────────────────────────────────────────────────────
+function GLBAvatar({
+  url,
   glossSequence,
   isPlaying,
   playbackSpeed,
   onGlossChange,
   onAnimationComplete,
 }: {
+  url: string;
   glossSequence: GlossEntry[];
   isPlaying: boolean;
   playbackSpeed: number;
   onGlossChange?: (i: number) => void;
   onAnimationComplete?: () => void;
 }) {
-  const lUpper = useRef<THREE.Group>(null);
-  const rUpper = useRef<THREE.Group>(null);
-  const lLower = useRef<THREE.Group>(null);
-  const rLower = useRef<THREE.Group>(null);
-  const lWrist = useRef<THREE.Group>(null);
-  const rWrist = useRef<THREE.Group>(null);
+  const { scene } = useGLTF(url);
+  const cloned = useMemo(() => SkeletonUtils.clone(scene) as THREE.Group, [scene]);
 
-  const lFingers    = useRef<(THREE.Group | null)[]>([null, null, null, null]);
-  const rFingers    = useRef<(THREE.Group | null)[]>([null, null, null, null]);
-  const lMidFingers = useRef<(THREE.Group | null)[]>([null, null, null, null]);
-  const rMidFingers = useRef<(THREE.Group | null)[]>([null, null, null, null]);
-  const lThumb      = useRef<THREE.Group | null>(null);
-  const rThumb      = useRef<THREE.Group | null>(null);
+  const bonesRef = useRef<Map<string, THREE.Bone>>(new Map());
 
-  const elapsedRef = useRef(0);
-  const prevIdxRef = useRef(-1);
-  const poseRef    = useRef<FullPose>(NEUTRAL);
-  const idleRef    = useRef(0);
-  const blinkRef   = useRef(0);
-  const lEyeLid    = useRef<THREE.Mesh>(null);
-  const rEyeLid    = useRef<THREE.Mesh>(null);
+  useEffect(() => {
+    const map = new Map<string, THREE.Bone>();
+    cloned.traverse(obj => { if ((obj as THREE.Bone).isBone) map.set(obj.name, obj as THREE.Bone); });
+    bonesRef.current = map;
+    // Log found bones in dev so users can verify naming
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[SignAvatar] bones found:', [...map.keys()].join(', '));
+    }
+  }, [cloned]);
+
+  const elapsedRef  = useRef(0);
+  const prevIdxRef  = useRef(-1);
+  const poseRef     = useRef<FullPose>(NEUTRAL);
+  const idleRef     = useRef(0);
 
   useEffect(() => {
     elapsedRef.current = 0;
@@ -419,24 +257,16 @@ function AvatarScene({
 
   useFrame((_, delta) => {
     idleRef.current += delta;
-    blinkRef.current += delta;
-    const breathe = Math.sin(idleRef.current * 1.1) * 0.012;
+    const B = bonesRef.current;
     const alpha = Math.min(0.09 + delta * 2.5, 0.22);
 
-    // Blink every ~4s
-    const blinkCycle = blinkRef.current % 4.0;
-    const blinkScale = blinkCycle < 0.12 ? 1 - (blinkCycle / 0.06) * 0.9 : 1;
-    if (lEyeLid.current) lEyeLid.current.scale.y = blinkScale;
-    if (rEyeLid.current) rEyeLid.current.scale.y = blinkScale;
+    // Subtle breathing on spine
+    const breathe = Math.sin(idleRef.current * 1.1) * 0.008;
+    const spine = findBone(B, 'Spine');
+    if (spine) spine.rotation.x += (breathe - spine.rotation.x) * 0.04;
 
     if (!isPlaying || glossSequence.length === 0) {
-      lerpGroup(lUpper, [NEUTRAL.L.upper[0]+breathe, NEUTRAL.L.upper[1], NEUTRAL.L.upper[2]], 0.04);
-      lerpGroup(rUpper, [NEUTRAL.R.upper[0]+breathe, NEUTRAL.R.upper[1], NEUTRAL.R.upper[2]], 0.04);
-      lerpGroup(lLower, NEUTRAL.L.lower, 0.04);
-      lerpGroup(rLower, NEUTRAL.R.lower, 0.04);
-      lerpGroup(lWrist, NEUTRAL.L.wrist, 0.04);
-      lerpGroup(rWrist, NEUTRAL.R.wrist, 0.04);
-      applyFingers(NEUTRAL.L.hand, NEUTRAL.R.hand, 0.04);
+      applyPose(NEUTRAL, B, 0.04);
       return;
     }
 
@@ -444,9 +274,7 @@ function AvatarScene({
     const ms = elapsedRef.current;
     let activeIdx = -1;
     for (let i = 0; i < glossSequence.length; i++) {
-      if (ms >= glossSequence[i].startMs && ms < glossSequence[i].endMs) {
-        activeIdx = i; break;
-      }
+      if (ms >= glossSequence[i].startMs && ms < glossSequence[i].endMs) { activeIdx = i; break; }
     }
 
     if (activeIdx !== prevIdxRef.current) {
@@ -462,291 +290,123 @@ function AvatarScene({
       }
     }
 
-    const p = poseRef.current;
-    lerpGroup(lUpper, p.L.upper, alpha);
-    lerpGroup(rUpper, p.R.upper, alpha);
-    lerpGroup(lLower, p.L.lower, alpha);
-    lerpGroup(rLower, p.R.lower, alpha);
-    lerpGroup(lWrist, p.L.wrist, alpha);
-    lerpGroup(rWrist, p.R.wrist, alpha);
-    applyFingers(p.L.hand, p.R.hand, alpha);
+    applyPose(poseRef.current, B, alpha);
   });
 
-  function applyFingers(lHand: HandShape, rHand: HandShape, a: number) {
-    const MAX_PROX = 1.1;
-    const MAX_MID  = 0.9;
-    for (let i = 0; i < 4; i++) {
-      lerpGroupX(lFingers.current[i],    -lHand.fingers[i] * MAX_PROX, a);
-      lerpGroupX(rFingers.current[i],    -rHand.fingers[i] * MAX_PROX, a);
-      lerpGroupX(lMidFingers.current[i], -lHand.fingers[i] * MAX_MID, a);
-      lerpGroupX(rMidFingers.current[i], -rHand.fingers[i] * MAX_MID, a);
-    }
-    lerpGroupX(lThumb.current, lHand.thumb * 0.55 - 0.12, a);
-    lerpGroupX(rThumb.current, rHand.thumb * 0.55 - 0.12, a);
-  }
+  return <primitive object={cloned} />;
+}
 
-  // ─── Colours ─────────────────────────────────────────────────────────────────
-  const skin    = '#E8B89A';
-  const skinDk  = '#D4956E';   // slightly darker for jaw/neck shadow
-  const shirt   = '#3B82F6';
-  const pants   = '#1E293B';
-  const shoe    = '#374151';
-  const hair    = '#2C1810';
-  const white   = '#F8F8F8';
-  const irisCol = '#5B7FA6';   // blue-grey iris
-  const pupil   = '#111111';
-  const lip     = '#C47A6A';
-  const brow    = '#2C1810';
-  const scleraS = '#E8D5C4';   // slight warmth on sclera
+// ─── Bone animation ───────────────────────────────────────────────────────────
+const MAX_PROX = 1.1; // radians, finger proximal curl
+const MAX_MID  = 0.85;
 
+function applyPose(pose: FullPose, B: Map<string, THREE.Bone>, a: number) {
+  const { L, R } = pose;
+
+  // Arms
+  lerpBone(findBone(B,'LeftArm'),     L.upper[0], L.upper[1], L.upper[2], a);
+  lerpBone(findBone(B,'RightArm'),    R.upper[0], R.upper[1], R.upper[2], a);
+  lerpBone(findBone(B,'LeftForeArm'), L.lower[0], L.lower[1], L.lower[2], a);
+  lerpBone(findBone(B,'RightForeArm'),R.lower[0], R.lower[1], R.lower[2], a);
+  lerpBone(findBone(B,'LeftHand'),    L.wrist[0], L.wrist[1], L.wrist[2], a);
+  lerpBone(findBone(B,'RightHand'),   R.wrist[0], R.wrist[1], R.wrist[2], a);
+
+  // Left fingers [index, middle, ring, pinky]
+  const lf = L.hand.fingers;
+  lerpBoneX(findBone(B,'LI1'), -lf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'LI2'), -lf[0]*MAX_MID, a);
+  lerpBoneX(findBone(B,'LM1'), -lf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'LM2'), -lf[1]*MAX_MID, a);
+  lerpBoneX(findBone(B,'LR1'), -lf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'LR2'), -lf[2]*MAX_MID, a);
+  lerpBoneX(findBone(B,'LP1'), -lf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'LP2'), -lf[3]*MAX_MID, a);
+  lerpBoneX(findBone(B,'LT1'), L.hand.thumb*0.5 - 0.1, a);
+  lerpBoneX(findBone(B,'LT2'), L.hand.thumb*0.4, a);
+
+  // Right fingers
+  const rf = R.hand.fingers;
+  lerpBoneX(findBone(B,'RI1'), -rf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'RI2'), -rf[0]*MAX_MID, a);
+  lerpBoneX(findBone(B,'RM1'), -rf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'RM2'), -rf[1]*MAX_MID, a);
+  lerpBoneX(findBone(B,'RR1'), -rf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'RR2'), -rf[2]*MAX_MID, a);
+  lerpBoneX(findBone(B,'RP1'), -rf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'RP2'), -rf[3]*MAX_MID, a);
+  lerpBoneX(findBone(B,'RT1'), R.hand.thumb*0.5 - 0.1, a);
+  lerpBoneX(findBone(B,'RT2'), R.hand.thumb*0.4, a);
+}
+
+function lerpBoneX(bone: THREE.Bone | null, target: number, a: number) {
+  if (!bone) return;
+  bone.rotation.x += (target - bone.rotation.x) * a;
+}
+
+// ─── Fallback placeholder (shown while GLB not yet placed) ───────────────────
+function FallbackAvatar() {
   return (
-    <group position={[0, -0.95, 0]}>
-
-      {/* ── LOWER BODY ───────────────────────────────────────────────── */}
-      {([-0.11, 0.11] as const).map((x, i) => (
-        <group key={i}>
-          <mesh position={[x, 0.44, 0]}>
-            <capsuleGeometry args={[0.072, 0.36, 5, 10]} />
-            <meshStandardMaterial color={pants} roughness={0.7} />
-          </mesh>
-          <mesh position={[x, 0.10, 0]}>
-            <capsuleGeometry args={[0.058, 0.28, 5, 10]} />
-            <meshStandardMaterial color={pants} roughness={0.7} />
-          </mesh>
-          {/* Shoe */}
-          <mesh position={[x, -0.07, 0.025]}>
-            <boxGeometry args={[0.105, 0.065, 0.2]} />
-            <meshStandardMaterial color={shoe} roughness={0.8} />
-          </mesh>
-          <mesh position={[x * 1.1, -0.062, 0.065]}>
-            <sphereGeometry args={[0.052, 10, 8]} />
-            <meshStandardMaterial color={shoe} roughness={0.8} />
-          </mesh>
-        </group>
+    <group position={[0, -0.8, 0]}>
+      {/* Body */}
+      <mesh position={[0, 1.1, 0]}>
+        <capsuleGeometry args={[0.18, 0.55, 6, 12]} />
+        <meshStandardMaterial color="#3B82F6" roughness={0.5} />
+      </mesh>
+      {/* Head */}
+      <mesh position={[0, 1.75, 0]}>
+        <sphereGeometry args={[0.18, 24, 24]} />
+        <meshStandardMaterial color="#E8B89A" roughness={0.5} />
+      </mesh>
+      {/* Eyes */}
+      {([-0.065, 0.065] as const).map((x, i) => (
+        <mesh key={i} position={[x, 1.77, 0.16]}>
+          <sphereGeometry args={[0.022, 12, 12]} />
+          <meshStandardMaterial color="#F8F8F8" roughness={0.1} />
+        </mesh>
       ))}
-
-      {/* Waist / belt */}
-      <mesh position={[0, 0.745, 0]}>
-        <boxGeometry args={[0.40, 0.08, 0.22]} />
-        <meshStandardMaterial color={pants} roughness={0.7} />
+      <mesh position={[0, 1.68, 0.17]}>
+        <sphereGeometry args={[0.016, 10, 8]} />
+        <meshStandardMaterial color="#E8B89A" roughness={0.5} />
       </mesh>
-      <mesh position={[0, 0.786, 0]}>
-        <boxGeometry args={[0.38, 0.018, 0.20]} />
-        <meshStandardMaterial color={'#374151'} roughness={0.4} metalness={0.3} />
-      </mesh>
-
-      {/* ── TORSO ────────────────────────────────────────────────────── */}
-      <mesh position={[0, 1.12, 0]}>
-        <boxGeometry args={[0.44, 0.52, 0.22]} />
-        <meshStandardMaterial color={shirt} roughness={0.5} />
-      </mesh>
-      {/* Collar */}
-      <mesh position={[0, 1.35, 0.09]}>
-        <boxGeometry args={[0.14, 0.06, 0.04]} />
-        <meshStandardMaterial color={white} roughness={0.4} />
-      </mesh>
-
-      {/* ── LEFT ARM ─────────────────────────────────────────────────── */}
-      <group ref={lUpper} position={[-0.245, 1.33, 0]}>
-        <mesh position={[0, -0.185, 0]}>
-          <capsuleGeometry args={[0.058, 0.27, 5, 10]} />
-          <meshStandardMaterial color={shirt} roughness={0.5} />
-        </mesh>
-        <group ref={lLower} position={[0, -0.375, 0]}>
-          <mesh position={[0, -0.15, 0]}>
-            <capsuleGeometry args={[0.048, 0.23, 5, 10]} />
-            <meshStandardMaterial color={skin} roughness={0.55} />
-          </mesh>
-          <group ref={lWrist} position={[0, -0.29, 0]}>
-            <HumanHand
-              side="L"
-              fingerRefs={lFingers}
-              midFingerRefs={lMidFingers}
-              thumbRef={lThumb}
-            />
-          </group>
-        </group>
-      </group>
-
-      {/* ── RIGHT ARM ────────────────────────────────────────────────── */}
-      <group ref={rUpper} position={[0.245, 1.33, 0]}>
-        <mesh position={[0, -0.185, 0]}>
-          <capsuleGeometry args={[0.058, 0.27, 5, 10]} />
-          <meshStandardMaterial color={shirt} roughness={0.5} />
-        </mesh>
-        <group ref={rLower} position={[0, -0.375, 0]}>
-          <mesh position={[0, -0.15, 0]}>
-            <capsuleGeometry args={[0.048, 0.23, 5, 10]} />
-            <meshStandardMaterial color={skin} roughness={0.55} />
-          </mesh>
-          <group ref={rWrist} position={[0, -0.29, 0]}>
-            <HumanHand
-              side="R"
-              fingerRefs={rFingers}
-              midFingerRefs={rMidFingers}
-              thumbRef={rThumb}
-            />
-          </group>
-        </group>
-      </group>
-
-      {/* ── NECK ─────────────────────────────────────────────────────── */}
-      <mesh position={[0, 1.50, 0]}>
-        <cylinderGeometry args={[0.068, 0.078, 0.20, 16]} />
-        <meshStandardMaterial color={skin} roughness={0.55} />
-      </mesh>
-
-      {/* ── HEAD ─────────────────────────────────────────────────────── */}
-      <group position={[0, 1.73, 0]}>
-        {/* Skull */}
-        <mesh>
-          <sphereGeometry args={[0.185, 32, 32]} />
-          <meshStandardMaterial color={skin} roughness={0.55} />
-        </mesh>
-
-        {/* Jaw / lower face (slightly darker, elongated) */}
-        <mesh position={[0, -0.115, 0.02]} scale={[0.82, 0.55, 0.78]}>
-          <sphereGeometry args={[0.185, 24, 24]} />
-          <meshStandardMaterial color={skinDk} roughness={0.6} />
-        </mesh>
-
-        {/* Hair cap */}
-        <mesh position={[0, 0.055, -0.01]}>
-          <sphereGeometry args={[0.192, 32, 20, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
-          <meshStandardMaterial color={hair} roughness={0.9} />
-        </mesh>
-        {/* Hair sides */}
-        <mesh position={[-0.17, -0.04, -0.03]} scale={[0.38, 0.52, 0.35]}>
-          <sphereGeometry args={[0.192, 14, 14]} />
-          <meshStandardMaterial color={hair} roughness={0.9} />
-        </mesh>
-        <mesh position={[0.17, -0.04, -0.03]} scale={[0.38, 0.52, 0.35]}>
-          <sphereGeometry args={[0.192, 14, 14]} />
-          <meshStandardMaterial color={hair} roughness={0.9} />
-        </mesh>
-
-        {/* ── EARS ── */}
-        {([-1, 1] as const).map((s, i) => (
-          <group key={i} position={[s * 0.185, -0.012, 0]}>
-            {/* Outer ear */}
-            <mesh scale={[0.42, 0.65, 0.3]}>
-              <sphereGeometry args={[0.065, 14, 12]} />
-              <meshStandardMaterial color={skinDk} roughness={0.6} />
-            </mesh>
-            {/* Inner concha */}
-            <mesh position={[s * -0.018, 0, 0.004]} scale={[0.3, 0.42, 0.2]}>
-              <sphereGeometry args={[0.055, 10, 8]} />
-              <meshStandardMaterial color={'#C88060'} roughness={0.7} />
-            </mesh>
-          </group>
-        ))}
-
-        {/* ── EYEBROWS ── */}
-        {([-1, 1] as const).map((s, i) => (
-          <mesh
-            key={i}
-            position={[s * 0.062, 0.068, 0.168]}
-            rotation={[0, 0, s * -0.18]}
-            scale={[1, 0.7, 1]}
-          >
-            <capsuleGeometry args={[0.006, 0.046, 3, 8]} />
-            <meshStandardMaterial color={brow} roughness={0.8} />
-          </mesh>
-        ))}
-
-        {/* ── EYES ── */}
-        {([-1, 1] as const).map((s, i) => (
-          <group key={i} position={[s * 0.062, 0.032, 0.155]}>
-            {/* Eye socket shadow */}
-            <mesh position={[0, 0, -0.006]} scale={[1.25, 1.1, 1]}>
-              <circleGeometry args={[0.026, 20]} />
-              <meshStandardMaterial color={'#C8896A'} roughness={0.8} />
-            </mesh>
-            {/* Sclera (eyeball white) */}
-            <mesh>
-              <sphereGeometry args={[0.022, 18, 18]} />
-              <meshStandardMaterial color={scleraS} roughness={0.15} />
-            </mesh>
-            {/* Iris */}
-            <mesh position={[0, 0, 0.018]}>
-              <circleGeometry args={[0.013, 20]} />
-              <meshStandardMaterial color={irisCol} roughness={0.1} />
-            </mesh>
-            {/* Pupil */}
-            <mesh position={[0, 0, 0.02]}>
-              <circleGeometry args={[0.007, 16]} />
-              <meshStandardMaterial color={pupil} roughness={0.05} />
-            </mesh>
-            {/* Highlight */}
-            <mesh position={[0.005, 0.005, 0.021]}>
-              <circleGeometry args={[0.003, 8]} />
-              <meshStandardMaterial color={white} roughness={0.0} />
-            </mesh>
-            {/* Upper eyelid */}
-            <mesh
-              ref={i === 0 ? lEyeLid : rEyeLid}
-              position={[0, 0.008, 0.021]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <capsuleGeometry args={[0.004, 0.034, 3, 8]} />
-              <meshStandardMaterial color={skinDk} roughness={0.5} />
-            </mesh>
-          </group>
-        ))}
-
-        {/* ── NOSE ── */}
-        {/* Bridge */}
-        <mesh position={[0, 0.005, 0.175]} scale={[0.5, 1, 0.7]}>
-          <sphereGeometry args={[0.028, 12, 12]} />
-          <meshStandardMaterial color={skin} roughness={0.55} />
-        </mesh>
-        {/* Tip */}
-        <mesh position={[0, -0.022, 0.182]} scale={[1, 0.75, 0.8]}>
-          <sphereGeometry args={[0.018, 12, 10]} />
-          <meshStandardMaterial color={skinDk} roughness={0.6} />
-        </mesh>
-        {/* Nostrils */}
-        {([-1, 1] as const).map((s, i) => (
-          <mesh key={i} position={[s * 0.015, -0.028, 0.174]} scale={[0.7, 0.55, 0.6]}>
-            <sphereGeometry args={[0.014, 10, 8]} />
-            <meshStandardMaterial color={skinDk} roughness={0.65} />
-          </mesh>
-        ))}
-
-        {/* ── MOUTH ── */}
-        {/* Upper lip */}
-        <mesh position={[0, -0.072, 0.168]} rotation={[0, 0, 0]}>
-          <capsuleGeometry args={[0.007, 0.048, 3, 8]} />
-          <meshStandardMaterial color={lip} roughness={0.4} />
-        </mesh>
-        {/* Cupid's bow centre dip */}
-        <mesh position={[0, -0.068, 0.169]} scale={[0.5, 0.6, 1]}>
-          <sphereGeometry args={[0.009, 8, 6]} />
-          <meshStandardMaterial color={lip} roughness={0.4} />
-        </mesh>
-        {/* Lower lip */}
-        <mesh position={[0, -0.084, 0.167]} scale={[1, 0.7, 1]}>
-          <capsuleGeometry args={[0.009, 0.044, 3, 8]} />
-          <meshStandardMaterial color={lip} roughness={0.4} />
-        </mesh>
-        {/* Mouth corners */}
-        {([-1, 1] as const).map((s, i) => (
-          <mesh key={i} position={[s * 0.026, -0.077, 0.166]} scale={[0.6, 0.6, 0.8]}>
-            <sphereGeometry args={[0.008, 8, 6]} />
-            <meshStandardMaterial color={lip} roughness={0.45} />
-          </mesh>
-        ))}
-
-        {/* Chin dimple hint */}
-        <mesh position={[0, -0.155, 0.135]} scale={[0.9, 0.5, 0.6]}>
-          <sphereGeometry args={[0.028, 10, 8]} />
-          <meshStandardMaterial color={skinDk} roughness={0.65} />
-        </mesh>
-      </group>
     </group>
   );
 }
 
+// ─── Loading spinner overlay ──────────────────────────────────────────────────
+function LoadingFallback() {
+  return (
+    <group>
+      <FallbackAvatar />
+    </group>
+  );
+}
+
+// ─── Detect if avatar.glb exists by preloading ───────────────────────────────
+// We always try to load; if it fails we catch it with an error boundary.
+const AVATAR_URL = '/ready_player_me_male_avatar__vrchatgame.glb';
+
+// ─── Error boundary for missing GLB ──────────────────────────────────────────
+class GLBErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) {
+      return <LoadingFallback />;
+    }
+    return this.props.children;
+  }
+}
+
+// ─── Main scene wrapper ───────────────────────────────────────────────────────
+function AvatarScene(props: {
+  glossSequence: GlossEntry[];
+  isPlaying: boolean;
+  playbackSpeed: number;
+  onGlossChange?: (i: number) => void;
+  onAnimationComplete?: () => void;
+}) {
+  return (
+    <GLBErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <GLBAvatar url={AVATAR_URL} {...props} />
+      </Suspense>
+    </GLBErrorBoundary>
+  );
+}
+
+// ─── Public component ─────────────────────────────────────────────────────────
 export function SignAvatar({
   glossSequence = [],
   isPlaying = false,
@@ -756,11 +416,11 @@ export function SignAvatar({
 }: SignAvatarProps) {
   return (
     <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden">
-      <Canvas camera={{ position: [0, 0.5, 2.7], fov: 44 }} gl={{ antialias: true }}>
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[2, 5, 4]}   intensity={1.4} castShadow />
-        <directionalLight position={[-2, 3, 2]}  intensity={0.5} color="#ffe8d6" />
-        <directionalLight position={[0, -1, 3]}  intensity={0.15} color="#b0c8ff" />
+      <Canvas camera={{ position: [0, 1.4, 3.0], fov: 44 }} gl={{ antialias: true }}>
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
+        <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
+        <directionalLight position={[0, -1, 3]} intensity={0.15} color="#b0c8ff" />
         <Environment preset="studio" />
         <AvatarScene
           glossSequence={glossSequence}
@@ -781,3 +441,7 @@ export function SignAvatar({
     </div>
   );
 }
+
+// Preload hint so Three.js starts fetching early
+useGLTF.preload(AVATAR_URL);
+
