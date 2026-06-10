@@ -83,7 +83,9 @@ Rules:
 
     let rawGlosses: Array<{ gloss: string; confidence?: number; fingerspell?: boolean }>;
     try {
-      rawGlosses = JSON.parse(content);
+      // Strip markdown code fences if present (e.g. ```json ... ```)
+      const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      rawGlosses = JSON.parse(cleaned);
     } catch {
       throw new Error(`Failed to parse LLM response as JSON: ${content}`);
     }
