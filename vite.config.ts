@@ -178,8 +178,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // three MUST be checked before generic node_modules to avoid circular chunk
-          if (id.includes('/node_modules/three/') || id.includes('/node_modules/@react-three/')) return 'three';
+          // three (geometry/math only) — @react-three/* goes to vendor so it shares React
+          if (id.includes('/node_modules/three/')) return 'three';
           if (id.includes('node_modules')) {
             if (id.includes('@radix-ui') || id.includes('lucide-react')) return 'ui-vendor';
             if (id.includes('@tanstack') || id.includes('@trpc')) return 'data-vendor';
