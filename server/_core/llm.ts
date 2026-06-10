@@ -212,7 +212,12 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+
+const isAnthropicMode = () =>
+  !!(ENV.anthropicApiKey && ENV.anthropicApiKey.trim().length > 0 &&
+    (!ENV.forgeApiKey || ENV.forgeApiKey.trim().length === 0));
 
 const resolveApiUrl = () =>
   ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
@@ -220,10 +225,98 @@ const resolveApiUrl = () =>
     : "https://api.openai.com/v1/chat/completions";
 
 const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+  if (!ENV.forgeApiKey && !ENV.anthropicApiKey) {
+    throw new Error("No LLM API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.");
   }
 };
+
+// ─── Anthropic adapter ────────────────────────────────────────────────────────
+// Translates InvokeParams → Anthropic Messages API, returns InvokeResult shape.
+
+async function invokeAnthropic(params: InvokeParams): Promise<InvokeResult> {
+  const { messages, model, maxTokens, max_tokens } = params;
+
+  // Extract system prompt (Anthropic takes it separately)
+  const systemMsg = messages.find(m => m.role === "system");
+  const userMessages = messages
+    .filter(m => m.role !== "system")
+    .map(m => ({
+      role: m.role as "user" | "assistant",
+      content: typeof m.content === "string"
+        ? m.content
+        : Array.isArray(m.content)
+          ? (m.content as Array<{type: string; text?: string}>)
+              .filter(p => p.type === "text")
+              .map(p => p.text ?? "")
+              .join("\n")
+          : String(m.content),
+    }));
+
+  const resolvedModel = model ?? DEFAULT_ANTHROPIC_MODEL;
+  const resolvedMaxTokens = max_tokens ?? maxTokens ?? 1024;
+
+  const body: Record<string, unknown> = {
+    model: resolvedModel,
+    max_tokens: resolvedMaxTokens,
+    messages: userMessages,
+  };
+
+  if (systemMsg) {
+    body.system = typeof systemMsg.content === "string"
+      ? systemMsg.content
+      : Array.isArray(systemMsg.content)
+        ? (systemMsg.content as Array<{type: string; text?: string}>)
+            .filter(p => p.type === "text")
+            .map(p => p.text ?? "")
+            .join("\n")
+        : String(systemMsg.content);
+  }
+
+  const response = await fetchWithBackoff("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ENV.anthropicApiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+  }
+
+  const raw = (await response.json()) as {
+    id: string;
+    model: string;
+    content: Array<{ type: string; text?: string }>;
+    stop_reason: string;
+    usage: { input_tokens: number; output_tokens: number };
+  };
+
+  // Map to OpenAI InvokeResult shape so callers stay unchanged
+  return {
+    id: raw.id,
+    created: Math.floor(Date.now() / 1000),
+    model: raw.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: raw.content.find(c => c.type === "text")?.text ?? "",
+        },
+        finish_reason: raw.stop_reason ?? null,
+      },
+    ],
+    usage: {
+      prompt_tokens: raw.usage?.input_tokens ?? 0,
+      completion_tokens: raw.usage?.output_tokens ?? 0,
+      total_tokens: (raw.usage?.input_tokens ?? 0) + (raw.usage?.output_tokens ?? 0),
+    },
+  };
+}
 
 const normalizeResponseFormat = ({
   responseFormat,
@@ -344,6 +437,11 @@ const fetchWithBackoff = async (
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   assertApiKey();
 
+  // Route to Anthropic when ANTHROPIC_API_KEY is set and no OpenAI/Forge key
+  if (isAnthropicMode()) {
+    return invokeAnthropic(params);
+  }
+
   const {
     messages,
     tools,
@@ -361,7 +459,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: model ?? DEFAULT_MODEL,
+    model: model ?? DEFAULT_OPENAI_MODEL,
     messages: messages.map(normalizeMessage),
   };
 
@@ -449,4 +547,5 @@ export async function listLLMModels(): Promise<ModelsResponse> {
     );
   }
 
-  return (await response.jso
+  return (await response.json()) as ModelsResponse;
+}
