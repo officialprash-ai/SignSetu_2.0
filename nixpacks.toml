@@ -1,5 +1,5 @@
 [phases.build]
-cmds = ["npm ci", "NODE_ENV=production npm run build"]
+cmds = ["NODE_ENV=production pnpm run build"]
 
 [start]
 cmd = "node dist/index.js"
