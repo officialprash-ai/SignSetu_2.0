@@ -12,4 +12,9 @@ export const getLoginUrl = () => {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
- 
+    scope: 'openid email profile',
+    state,
+  });
+
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+};
