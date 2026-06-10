@@ -1,7 +1,7 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -9,8 +9,13 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
-    options ?? {};
+  // Use a ref for redirectPath default to avoid calling getLoginUrl() on every render
+  const redirectPathRef = useRef<string | undefined>(options?.redirectPath);
+  if (redirectPathRef.current === undefined && options?.redirectPath === undefined) {
+    redirectPathRef.current = getLoginUrl();
+  }
+  const redirectPath = options?.redirectPath ?? redirectPathRef.current!;
+  const redirectOnUnauthenticated = options?.redirectOnUnauthenticated ?? false;
   const utils = trpc.useUtils();
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
@@ -42,10 +47,6 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, utils]);
 
   const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
     return {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
@@ -59,6 +60,10 @@ export function useAuth(options?: UseAuthOptions) {
     logoutMutation.error,
     logoutMutation.isPending,
   ]);
+
+  useEffect(() => {
+    localStorage.setItem("manus-runtime-user-info", JSON.stringify(state.user));
+  }, [state.user]);
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;

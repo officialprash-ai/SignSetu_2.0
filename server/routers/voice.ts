@@ -39,7 +39,8 @@ export const voiceRouter = router({
           input.mimeType
         );
         // url is a relative /manus-storage/… path — make it absolute
-        audioUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
+        const baseUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`;
+        audioUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
       } catch (err) {
         throw new TRPCError({
           code:    'INTERNAL_SERVER_ERROR',
