@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, Component, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, Component, type ReactNode } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -216,6 +216,7 @@ function lerpBone(bone: THREE.Bone | null, tx: number, ty: number, tz: number, a
 // ─── GLB avatar scene ─────────────────────────────────────────────────────────
 function GLBAvatar({
   url,
+  scale,
   glossSequence,
   isPlaying,
   playbackSpeed,
@@ -223,6 +224,7 @@ function GLBAvatar({
   onAnimationComplete,
 }: {
   url: string;
+  scale: number;
   glossSequence: GlossEntry[];
   isPlaying: boolean;
   playbackSpeed: number;
@@ -293,7 +295,7 @@ function GLBAvatar({
     applyPose(poseRef.current, B, alpha);
   });
 
-  return <primitive object={cloned} scale={0.55} position={[0, -1.0, 0]} />;
+  return <primitive object={cloned} scale={scale} position={[0, -1.0 * scale / 0.55, 0]} />;
 }
 
 // ─── Bone animation ───────────────────────────────────────────────────────────
@@ -391,6 +393,7 @@ class GLBErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 // ─── Main scene wrapper ───────────────────────────────────────────────────────
 function AvatarScene(props: {
+  scale: number;
   glossSequence: GlossEntry[];
   isPlaying: boolean;
   playbackSpeed: number;
@@ -406,7 +409,43 @@ function AvatarScene(props: {
   );
 }
 
+// ─── Zoom button ──────────────────────────────────────────────────────────────
+function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: '50%',
+        border: '1.5px solid rgba(255,255,255,0.25)',
+        background: 'rgba(15,23,42,0.55)',
+        backdropFilter: 'blur(6px)',
+        color: '#fff',
+        fontSize: 20,
+        lineHeight: 1,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 400,
+        userSelect: 'none',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.7)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'rgba(15,23,42,0.55)')}
+    >
+      {label}
+    </button>
+  );
+}
+
 // ─── Public component ─────────────────────────────────────────────────────────
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 1.1;
+const STEP      = 0.08;
+const BASE_SCALE = 0.55;
+
 export function SignAvatar({
   glossSequence = [],
   isPlaying = false,
@@ -414,8 +453,19 @@ export function SignAvatar({
   onGlossChange,
   onAnimationComplete,
 }: SignAvatarProps) {
+  const [avatarScale, setAvatarScale] = useState(BASE_SCALE);
+
+  const zoomIn  = () => setAvatarScale(s => Math.min(+(s + STEP).toFixed(3), MAX_SCALE));
+  const zoomOut = () => setAvatarScale(s => Math.max(+(s - STEP).toFixed(3), MIN_SCALE));
+  const reset   = () => setAvatarScale(BASE_SCALE);
+
+  const pct = Math.round(((avatarScale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)) * 100);
+
   return (
-    <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden">
+    <div
+      className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden"
+      style={{ position: 'relative' }}
+    >
       <Canvas camera={{ position: [0, 0.6, 4.2], fov: 42 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
@@ -423,6 +473,7 @@ export function SignAvatar({
         <directionalLight position={[0, -1, 3]} intensity={0.15} color="#b0c8ff" />
         <Environment preset="studio" />
         <AvatarScene
+          scale={avatarScale}
           glossSequence={glossSequence}
           isPlaying={isPlaying}
           playbackSpeed={playbackSpeed}
@@ -438,6 +489,41 @@ export function SignAvatar({
           maxAzimuthAngle={Math.PI / 4}
         />
       </Canvas>
+
+      {/* Zoom controls overlay */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 14,
+          right: 14,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+          zIndex: 10,
+        }}
+      >
+        <ZoomBtn label="+" onClick={zoomIn} />
+        {/* percentage pill */}
+        <button
+          onClick={reset}
+          title="Reset zoom"
+          style={{
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.8)',
+            background: 'rgba(15,23,42,0.45)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 12,
+            padding: '2px 8px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+            userSelect: 'none',
+          }}
+        >
+          {pct}%
+        </button>
+        <ZoomBtn label="−" onClick={zoomOut} />
+      </div>
     </div>
   );
 }
