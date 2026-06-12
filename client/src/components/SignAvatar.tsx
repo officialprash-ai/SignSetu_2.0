@@ -237,6 +237,19 @@ function GLBAvatar({
   const { scene } = useGLTF(url);
   const cloned = useMemo(() => SkeletonUtils.clone(scene) as THREE.Group, [scene]);
 
+  // Auto-fit: normalize the model to a fixed world height and center it,
+  // regardless of the GLB's native scale (this avatar is exported huge).
+  const fit = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(cloned);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    const TARGET_H = 2.2;                       // full-body height in world units
+    const baseScale = TARGET_H / (size.y || 1); // normalize height
+    return { baseScale, center };
+  }, [cloned]);
+
   const bonesRef = useRef<Map<string, THREE.Bone>>(new Map());
 
   useEffect(() => {
@@ -298,7 +311,16 @@ function GLBAvatar({
     applyPose(poseRef.current, B, alpha);
   });
 
-  return <primitive object={cloned} scale={scale} position={[0, -1.0 * scale / 0.55, 0]} />;
+  // scale = user zoom multiplier (~1). Normalize, then re-center the bbox at origin,
+  // biased slightly downward so the head/torso/hands sit in frame.
+  const s = fit.baseScale * scale;
+  return (
+    <primitive
+      object={cloned}
+      scale={s}
+      position={[-fit.center.x * s, -fit.center.y * s - 0.15, -fit.center.z * s]}
+    />
+  );
 }
 
 // ─── Bone animation ───────────────────────────────────────────────────────────
@@ -444,10 +466,11 @@ function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 // ─── Public component ─────────────────────────────────────────────────────────
-const MIN_SCALE = 0.15;
-const MAX_SCALE = 0.8;
-const STEP      = 0.06;
-const BASE_SCALE = 0.4;
+// scale is now a zoom multiplier applied on top of auto-fit normalization
+const MIN_SCALE = 0.6;
+const MAX_SCALE = 1.8;
+const STEP      = 0.1;
+const BASE_SCALE = 1.0;
 
 export function SignAvatar({
   glossSequence = [],
@@ -469,7 +492,7 @@ export function SignAvatar({
       className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden"
       style={{ position: 'relative' }}
     >
-      <Canvas camera={{ position: [0, -0.05, 4.2], fov: 32 }} gl={{ antialias: true }}>
+      <Canvas camera={{ position: [0, 0.1, 4.8], fov: 30 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
         <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
@@ -484,7 +507,7 @@ export function SignAvatar({
           onAnimationComplete={onAnimationComplete}
         />
         <OrbitControls
-          target={[0, -0.05, 0]}
+          target={[0, 0.1, 0]}
           enableZoom={false}
           enablePan={false}
           minPolarAngle={Math.PI / 4}

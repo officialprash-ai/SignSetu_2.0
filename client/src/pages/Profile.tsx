@@ -73,7 +73,7 @@ export default function Profile() {
           <User className="w-6 h-6 text-primary" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
             Profile Settings
           </h1>
           <p className="text-muted-foreground">Manage your account and preferences</p>

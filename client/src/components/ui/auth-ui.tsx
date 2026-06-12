@@ -202,7 +202,7 @@ function SignUpForm({ onAuth }: { onAuth: () => void }) {
 
 function AuthFormContainer({ isSignIn, onToggle, onAuth }: { isSignIn: boolean; onToggle: () => void; onAuth: () => void; }) {
   return (
-    <div className="mx-auto grid w-[350px] gap-3">
+    <div className="mx-auto grid w-full max-w-[350px] gap-3">
       {isSignIn ? <SignInForm onAuth={onAuth} /> : <SignUpForm onAuth={onAuth} />}
       <div className="text-center text-sm">
         {isSignIn ? "Don't have an account?" : "Already have an account?"}{" "}

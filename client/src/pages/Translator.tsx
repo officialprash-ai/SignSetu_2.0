@@ -223,7 +223,7 @@ export default function Translator() {
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h1 className="text-3xl font-bold">Sign Language Translator</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Sign Language Translator</h1>
         <p className="text-muted-foreground">Convert text, speech, or YouTube videos to sign language</p>
       </div>
 
@@ -405,7 +405,7 @@ export default function Translator() {
         {/* ── Right: Avatar Panel ── */}
         <div className="space-y-4">
           <Card className="p-5 space-y-4">
-            <div className="h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+            <div className="h-72 sm:h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
               {glossSequence.length > 0 || isPending ? (
                 <SignAvatar
                   key={replayKey}
