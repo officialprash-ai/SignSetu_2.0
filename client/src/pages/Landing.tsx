@@ -1,96 +1,26 @@
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Zap, Globe, Users, Play } from 'lucide-react';
-import { getLoginUrl } from '@/const';
-import { SignAvatar, type GlossEntry } from '@/components/SignAvatarLazy';
-import { useEffect, useRef, useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Spotlight } from '@/components/ui/spotlight';
+import { SplineScene } from '@/components/ui/splite';
+import { ArrowRight, Zap, Globe, Users, Play, Mic, BookOpen } from 'lucide-react';
 
-// Demo sequence cycling through common signs with labels
-const DEMO_SIGNS: { gloss: string; label: string }[] = [
-  { gloss: 'HELLO',     label: 'Hello'     },
-  { gloss: 'WELCOME',   label: 'Welcome'   },
-  { gloss: 'LEARN',     label: 'Learn'     },
-  { gloss: 'THANK-YOU', label: 'Thank You' },
-  { gloss: 'GOOD',      label: 'Good'      },
-  { gloss: 'HAPPY',     label: 'Happy'     },
-  { gloss: 'LOVE',      label: 'Love'      },
-  { gloss: 'HELP',      label: 'Help'      },
+const ROBOT_SCENE = 'https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode';
+
+const FEATURES = [
+  { icon: Zap,      tint: 'text-primary',   bg: 'bg-primary/10',   title: 'Instant Translation', desc: 'Convert text or speech to sign language in seconds with AI-powered accuracy.' },
+  { icon: Globe,    tint: 'text-secondary', bg: 'bg-secondary/10', title: 'Multi-Language',      desc: 'ASL and ISL support with proper grammar rules and cultural nuance.' },
+  { icon: Users,    tint: 'text-primary',   bg: 'bg-primary/10',   title: '3D Avatar',           desc: 'Smooth, lifelike animation with expressive hand shapes and body language.' },
+  { icon: Mic,      tint: 'text-primary',   bg: 'bg-primary/10',   title: 'Audio Input',         desc: 'Record or upload audio and watch it transform into beautiful signing.' },
+  { icon: BookOpen, tint: 'text-secondary', bg: 'bg-secondary/10', title: 'Sign Dictionary',     desc: 'Browse hundreds of signs with live 3D previews and detail.' },
+  { icon: Play,     tint: 'text-primary',   bg: 'bg-primary/10',   title: 'Playback Control',    desc: 'Pause, replay, and adjust signing speed to learn at your own pace.' },
 ];
 
-const SIGN_MS   = 1200;
-const PAUSE_MS  = 500;
-
-function buildSequence(gloss: string): GlossEntry[] {
-  return [{ gloss, startMs: PAUSE_MS, endMs: PAUSE_MS + SIGN_MS, confidence: 1 }];
-}
-
-function AvatarDemo() {
-  const [idx, setIdx]           = useState(0);
-  const [playing, setPlaying]   = useState(true);
-  const [sequence, setSequence] = useState<GlossEntry[]>(() => buildSequence(DEMO_SIGNS[0].gloss));
-  const timerRef                = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // When animation completes, advance to next sign after a short pause
-  const handleComplete = () => {
-    timerRef.current = setTimeout(() => {
-      setIdx(i => {
-        const next = (i + 1) % DEMO_SIGNS.length;
-        setSequence(buildSequence(DEMO_SIGNS[next].gloss));
-        return next;
-      });
-    }, 400);
-  };
-
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
-
-  const current = DEMO_SIGNS[idx];
-
-  return (
-    <div className="relative w-full h-full flex flex-col">
-      {/* Avatar */}
-      <div className="flex-1 min-h-0">
-        <SignAvatar
-          glossSequence={sequence}
-          isPlaying={playing}
-          playbackSpeed={1}
-          onAnimationComplete={handleComplete}
-        />
-      </div>
-
-      {/* Sign label strip */}
-      <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-3 pointer-events-none">
-        <div className="px-4 py-1.5 rounded-full bg-background/80 backdrop-blur border border-border/60 shadow-sm">
-          <span className="text-sm font-semibold text-foreground">{current.label}</span>
-        </div>
-      </div>
-
-      {/* Dot indicators */}
-      <div className="absolute top-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
-        {DEMO_SIGNS.map((_, i) => (
-          <div
-            key={i}
-            className={`rounded-full transition-all duration-300 ${
-              i === idx ? 'w-4 h-1.5 bg-primary' : 'w-1.5 h-1.5 bg-muted-foreground/30'
-            }`}
-          />
-        ))}
-      </div>
-
-      {/* Play/pause overlay */}
-      <button
-        onClick={() => setPlaying(p => !p)}
-        className="absolute inset-0 bg-transparent cursor-pointer focus:outline-none"
-        aria-label={playing ? 'Pause demo' : 'Play demo'}
-      />
-      {!playing && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm rounded-xl">
-          <div className="w-14 h-14 rounded-full bg-primary/90 flex items-center justify-center shadow-lg">
-            <Play className="w-6 h-6 text-primary-foreground ml-0.5" />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const STATS = [
+  { value: '2', label: 'Sign languages' },
+  { value: '500+', label: 'Signs covered' },
+  { value: '3D', label: 'Animated avatar' },
+  { value: '<1s', label: 'Translation time' },
+];
 
 export default function Landing() {
   return (
@@ -105,132 +35,147 @@ export default function Landing() {
             <span className="font-bold text-lg">SignSetu</span>
           </div>
           <div className="flex items-center gap-4">
-            <a href={getLoginUrl()} className="text-sm font-medium hover:text-primary transition-colors">
+            <a href="#features" className="hidden sm:block text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
+              Features
+            </a>
+            <a href="/login" className="text-sm font-medium hover:text-primary transition-colors">
               Sign In
             </a>
             <Button asChild>
-              <a href={getLoginUrl()}>Get Started</a>
+              <a href="/login">Get Started</a>
             </Button>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="container py-16 md:py-24">
-        <div className="grid md:grid-cols-2 gap-12 items-center max-w-6xl mx-auto">
-          {/* Left: copy */}
-          <div className="space-y-8">
-            <div className="space-y-4">
-              <div className="inline-block px-4 py-2 rounded-full bg-primary/10 border border-primary/20">
-                <span className="text-sm font-semibold text-primary">✨ AI-Powered Sign Language Bridge</span>
+      {/* Hero Section — dark spotlight card */}
+      <section className="container py-10 md:py-16">
+        <Card className="relative w-full overflow-hidden rounded-3xl border-white/10 bg-black/[0.96] shadow-2xl">
+          <Spotlight className="-top-40 left-0 md:-top-20 md:left-60" fill="white" />
+          {/* subtle dotted grid */}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-[0.15]"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.4) 1px, transparent 0)',
+              backgroundSize: '32px 32px',
+            }}
+          />
+
+          <div className="relative z-10 grid md:grid-cols-2 gap-8 items-center min-h-[520px] md:min-h-[580px]">
+            {/* Left: copy */}
+            <div className="flex flex-col justify-center p-8 md:p-12 space-y-7">
+              <div className="inline-flex w-fit items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/15">
+                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-xs font-medium text-neutral-300">AI-Powered Sign Language Bridge</span>
               </div>
-              <h1 className="text-5xl md:text-6xl font-bold tracking-tight leading-tight">
-                Bridging Language with{' '}
+
+              <h1 className="text-4xl md:text-6xl font-bold tracking-tight leading-[1.05] bg-clip-text text-transparent bg-gradient-to-b from-neutral-50 to-neutral-400">
+                Bridging language
+                <br />
+                with{' '}
                 <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-                  Sign
+                  sign
                 </span>
               </h1>
-              <p className="text-xl text-muted-foreground leading-relaxed">
-                SignSetu converts spoken and written language into beautiful, animated sign language with AI-powered translation and 3D avatars. Making communication accessible for everyone.
+
+              <p className="text-base md:text-lg text-neutral-300 max-w-md leading-relaxed">
+                SignSetu converts spoken and written language into beautiful, animated sign
+                language with AI translation and a live 3D avatar — making communication
+                accessible for everyone.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button size="lg" asChild className="group">
+                  <a href="/login">
+                    Try Translator
+                    <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                  </a>
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  asChild
+                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                >
+                  <a href="#features">
+                    <Play className="w-4 h-4 mr-2" />
+                    Learn More
+                  </a>
+                </Button>
+              </div>
+
+              <p className="text-xs text-neutral-500">
+                Powered by AI translation and a live 3D avatar
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" asChild className="group">
-                <a href={getLoginUrl()}>
-                  Try Translator
-                  <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                </a>
-              </Button>
-              <Button size="lg" variant="outline" asChild>
-                <a href="#features">
-                  <Play className="w-4 h-4 mr-2" />
-                  Learn More
-                </a>
-              </Button>
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              Click the avatar to pause · Signs cycle automatically
-            </p>
-          </div>
-
-          {/* Right: live avatar */}
-          <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-secondary/20 blur-3xl rounded-full opacity-40 scale-90" />
-            <div className="relative bg-card border border-border rounded-2xl shadow-xl overflow-hidden" style={{ height: '420px' }}>
-              <AvatarDemo />
+            {/* Right: interactive 3D robot */}
+            <div className="relative h-[320px] md:h-full min-h-[360px]">
+              <SplineScene scene={ROBOT_SCENE} className="w-full h-full" />
             </div>
           </div>
+        </Card>
+
+        {/* Stats strip */}
+        <div className="mx-auto mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl">
+          {STATS.map(s => (
+            <div key={s.label} className="rounded-xl border border-border bg-card p-5 text-center">
+              <div className="text-2xl md:text-3xl font-bold text-foreground">{s.value}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{s.label}</div>
+            </div>
+          ))}
         </div>
       </section>
 
       {/* Features Section */}
-      <section id="features" className="container py-20 md:py-32">
-        <div className="max-w-3xl mx-auto text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-bold mb-4">Powerful Features</h2>
-          <p className="text-lg text-muted-foreground">Everything you need for seamless sign language translation</p>
+      <section id="features" className="container py-20 md:py-28">
+        <div className="max-w-3xl mx-auto text-center mb-14">
+          <h2 className="text-3xl md:text-5xl font-bold mb-4">Powerful features</h2>
+          <p className="text-lg text-muted-foreground">
+            Everything you need for seamless sign language translation
+          </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-          <div className="group p-8 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-              <Zap className="w-6 h-6 text-primary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Instant Translation</h3>
-            <p className="text-muted-foreground">Convert text or speech to sign language in seconds with AI-powered accuracy</p>
-          </div>
-
-          <div className="group p-8 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-            <div className="w-12 h-12 rounded-lg bg-secondary/10 flex items-center justify-center mb-4 group-hover:bg-secondary/20 transition-colors">
-              <Globe className="w-6 h-6 text-secondary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Multi-Language</h3>
-            <p className="text-muted-foreground">Support for ASL and ISL with proper grammar rules and cultural nuances</p>
-          </div>
-
-          <div className="group p-8 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-              <Users className="w-6 h-6 text-primary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">3D Avatar</h3>
-            <p className="text-muted-foreground">Smooth, lifelike animations with expressive hand shapes and body language</p>
-          </div>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto mt-8">
-          <div className="group p-8 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-              <Play className="w-6 h-6 text-primary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Audio Input</h3>
-            <p className="text-muted-foreground">Record or upload audio and watch it transform into beautiful sign language</p>
-          </div>
-
-          <div className="group p-8 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-            <div className="w-12 h-12 rounded-lg bg-secondary/10 flex items-center justify-center mb-4 group-hover:bg-secondary/20 transition-colors">
-              <Globe className="w-6 h-6 text-secondary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Sign Dictionary</h3>
-            <p className="text-muted-foreground">Browse hundreds of signs with live 3D previews and detailed information</p>
-          </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {FEATURES.map(f => {
+            const Icon = f.icon;
+            return (
+              <div
+                key={f.title}
+                className="group p-7 rounded-2xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
+              >
+                <div className={`w-12 h-12 rounded-xl ${f.bg} flex items-center justify-center mb-4 transition-transform group-hover:scale-110`}>
+                  <Icon className={`w-6 h-6 ${f.tint}`} />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">{f.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+              </div>
+            );
+          })}
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="container py-20 md:py-32">
-        <div className="max-w-2xl mx-auto text-center space-y-8 bg-card border border-border rounded-2xl p-12">
-          <h2 className="text-4xl font-bold">Ready to Bridge the Gap?</h2>
-          <p className="text-lg text-muted-foreground">
-            Start translating text and speech to sign language today. Join thousands of users making communication more accessible.
-          </p>
-          <Button size="lg" asChild className="group">
-            <a href={getLoginUrl()}>
-              Get Started Now
-              <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-            </a>
-          </Button>
-        </div>
+      <section className="container pb-20 md:pb-28">
+        <Card className="relative overflow-hidden rounded-3xl border-white/10 bg-black/[0.96] max-w-4xl mx-auto">
+          <Spotlight className="-top-20 right-0 md:right-40" fill="white" />
+          <div className="relative z-10 text-center space-y-7 p-10 md:p-16">
+            <h2 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-neutral-50 to-neutral-400">
+              Ready to bridge the gap?
+            </h2>
+            <p className="text-base md:text-lg text-neutral-300 max-w-xl mx-auto">
+              Start translating text and speech to sign language today. Join thousands making
+              communication more accessible.
+            </p>
+            <Button size="lg" asChild className="group">
+              <a href="/login">
+                Get Started Now
+                <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+              </a>
+            </Button>
+          </div>
+        </Card>
       </section>
 
       {/* Footer */}

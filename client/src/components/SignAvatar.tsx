@@ -58,6 +58,9 @@ const NAMED_POSES: Record<string, FullPose> = {
                  R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
   HI:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
                  R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
+  // Namaste — both palms pressed together at chest
+  NAMASTE:     { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
+                 R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
   BYE:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
                  R:{upper:[-1.1,0,-0.4],lower:[-0.3,0,0.2], wrist:[0.4,0.2,0],hand:OPEN} },
   GOODBYE:     { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
@@ -441,10 +444,10 @@ function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 // ─── Public component ─────────────────────────────────────────────────────────
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 1.1;
-const STEP      = 0.08;
-const BASE_SCALE = 0.55;
+const MIN_SCALE = 0.15;
+const MAX_SCALE = 0.8;
+const STEP      = 0.06;
+const BASE_SCALE = 0.4;
 
 export function SignAvatar({
   glossSequence = [],
@@ -466,7 +469,7 @@ export function SignAvatar({
       className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden"
       style={{ position: 'relative' }}
     >
-      <Canvas camera={{ position: [0, 0.6, 4.2], fov: 42 }} gl={{ antialias: true }}>
+      <Canvas camera={{ position: [0, -0.05, 4.2], fov: 32 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
         <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
@@ -481,6 +484,7 @@ export function SignAvatar({
           onAnimationComplete={onAnimationComplete}
         />
         <OrbitControls
+          target={[0, -0.05, 0]}
           enableZoom={false}
           enablePan={false}
           minPolarAngle={Math.PI / 4}

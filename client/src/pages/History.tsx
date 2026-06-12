@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Clock, Loader2, Mic, RotateCcw, Type } from 'lucide-react';
+import { Clock, Loader2, Mic, RotateCcw, Type, History as HistoryIcon } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useLocation } from 'wouter';
 
@@ -58,10 +58,18 @@ export default function History() {
   const isGuest   = !hasReal && !isLoading;
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-3xl font-bold">Translation History</h1>
-        <p className="text-muted-foreground">Your recent sign language translations</p>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+          <HistoryIcon className="w-6 h-6 text-primary" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
+            Translation History
+          </h1>
+          <p className="text-muted-foreground">Your recent sign language translations</p>
+        </div>
       </div>
 
       {isLoading && (
@@ -73,7 +81,7 @@ export default function History() {
 
       {!isLoading && displayed.length === 0 && (
         <div className="flex flex-col items-center justify-center py-24 gap-5 text-center">
-          <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center">
+          <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
             <span className="text-4xl">📋</span>
           </div>
           <div className="space-y-1.5 max-w-xs">
@@ -95,29 +103,32 @@ export default function History() {
       {!isLoading && displayed.length > 0 && (
         <>
           {isGuest && (
-            <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-4 py-2">
+            <p className="text-xs text-muted-foreground bg-muted/50 border border-border/60 rounded-xl px-4 py-2.5">
               Showing sample history — sign in to see your saved translations.
             </p>
           )}
 
           <div className="space-y-3">
             {displayed.map(item => (
-              <Card key={item.id} className="p-5">
+              <Card
+                key={item.id}
+                className="group p-5 rounded-2xl transition-all duration-300 hover:border-primary/40 hover:shadow-md"
+              >
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex-1 min-w-0 space-y-2.5">
                     <p className="font-medium truncate">{item.text}</p>
 
                     <div className="flex flex-wrap gap-1.5">
                       {item.glosses.slice(0, 12).map((g, i) => (
                         <span
                           key={i}
-                          className="px-2 py-0.5 bg-primary/10 border border-primary/20 rounded-full text-xs font-medium text-primary"
+                          className="px-2.5 py-0.5 bg-primary/10 border border-primary/20 rounded-full text-xs font-semibold text-primary"
                         >
                           {g}
                         </span>
                       ))}
                       {item.glosses.length > 12 && (
-                        <span className="px-2 py-0.5 bg-muted text-muted-foreground rounded-full text-xs">
+                        <span className="px-2.5 py-0.5 bg-muted text-muted-foreground rounded-full text-xs">
                           +{item.glosses.length - 12} more
                         </span>
                       )}
@@ -138,8 +149,8 @@ export default function History() {
 
                   <Button
                     size="sm"
-                    variant="ghost"
-                    className="shrink-0"
+                    variant="outline"
+                    className="shrink-0 group-hover:border-primary/40 group-hover:text-primary transition-colors"
                     onClick={() => navigate(`/?replay=${encodeURIComponent(item.text)}&lang=${item.language}`)}
                   >
                     <RotateCcw className="w-4 h-4 mr-1" />

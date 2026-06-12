@@ -2,7 +2,7 @@ import { useState, useDeferredValue } from 'react';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Play, X } from 'lucide-react';
+import { Loader2, Search, Play, X, BookOpen } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -77,7 +77,7 @@ function SignPreviewDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="h-72 w-full rounded-xl overflow-hidden">
+        <div className="h-72 w-full rounded-xl overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
           <SignAvatar
             glossSequence={glossSequence}
             isPlaying={isPlaying}
@@ -136,12 +136,21 @@ export default function Dictionary() {
   const isLive = !!(data && data.length > 0);
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-3xl font-bold">Sign Dictionary</h1>
-        <p className="text-muted-foreground">Browse and search the sign language lexicon</p>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+          <BookOpen className="w-6 h-6 text-primary" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
+            Sign Dictionary
+          </h1>
+          <p className="text-muted-foreground">Browse and search the sign language lexicon</p>
+        </div>
       </div>
 
+      {/* Search + filter */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[220px]">
           {isFetching
@@ -152,19 +161,19 @@ export default function Dictionary() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search signs..."
-            className="pl-9"
+            className="pl-9 h-11"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 p-1 rounded-xl bg-muted">
           {(['ASL', 'ISL'] as const).map(lang => (
             <button
               key={lang}
               onClick={() => setLangFilter(lang)}
               className={cn(
-                'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+                'px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
                 langFilter === lang
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border hover:bg-muted'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {lang === 'ASL' ? '\u{1F1FA}\u{1F1F8} ASL' : '\u{1F1EE}\u{1F1F3} ISL'}
@@ -179,6 +188,7 @@ export default function Dictionary() {
         </p>
       )}
 
+      {/* Grid */}
       <div className={cn(
         'grid sm:grid-cols-2 lg:grid-cols-3 gap-4',
         isFetching && 'opacity-60 pointer-events-none'
@@ -186,20 +196,22 @@ export default function Dictionary() {
         {signs.map((sign, idx) => (
           <Card
             key={idx}
-            className="p-4 hover:shadow-md transition-all cursor-pointer group hover:border-primary/40"
+            className="group relative p-5 rounded-2xl cursor-pointer overflow-hidden transition-all duration-300 hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5"
             onClick={() => setSelected(sign)}
           >
-            <div className="flex items-start justify-between mb-2">
+            <div className="flex items-start justify-between mb-3">
               <span className="text-lg font-bold group-hover:text-primary transition-colors">
                 {sign.gloss}
               </span>
-              <Badge variant="secondary" className="text-xs">{sign.language}</Badge>
+              <Badge variant="secondary" className="text-xs shrink-0">{sign.language}</Badge>
             </div>
             {sign.category && (
-              <p className="text-xs text-muted-foreground mb-1">{sign.category}</p>
+              <p className="text-xs text-muted-foreground mb-3">{sign.category}</p>
             )}
-            <div className="w-full h-10 rounded bg-muted/40 flex items-center justify-center mt-2 gap-2 text-xs text-muted-foreground group-hover:bg-primary/5 group-hover:text-primary transition-colors">
-              <Play className="h-3 w-3" />
+            <div className="w-full h-11 rounded-xl bg-gradient-to-r from-primary/5 to-secondary/5 border border-border/60 flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground transition-all group-hover:from-primary/10 group-hover:to-secondary/10 group-hover:text-primary group-hover:border-primary/30">
+              <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                <Play className="h-3 w-3 text-primary ml-0.5" />
+              </span>
               Preview sign
             </div>
           </Card>
@@ -212,7 +224,7 @@ export default function Dictionary() {
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground text-center pt-4">
+      <p className="text-xs text-muted-foreground text-center pt-2">
         {isLive
           ? `${signs.length} signs from live dictionary`
           : `${signs.length} sample signs · Connect DB to see full dictionary`

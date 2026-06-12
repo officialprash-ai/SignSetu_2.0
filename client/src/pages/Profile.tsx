@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut } from "lucide-react";
+import { LogOut, User, Settings, Hand } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -66,25 +66,37 @@ export default function Profile() {
   if (!user) return null;
 
   return (
-    <div className="container max-w-2xl py-8 space-y-8 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Profile Settings</h1>
+    <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+          <User className="w-6 h-6 text-primary" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
+            Profile Settings
+          </h1>
+          <p className="text-muted-foreground">Manage your account and preferences</p>
+        </div>
       </div>
 
-      <div className="grid gap-8">
-        <Card>
+      <div className="grid gap-6">
+        <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle>Personal Information</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <User className="w-4 h-4 text-primary" />
+              Personal Information
+            </CardTitle>
             <CardDescription>Update your personal details here.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Name + avatar preview side by side */}
-            <div className="flex gap-4 items-start">
+            <div className="flex flex-col sm:flex-row gap-5 items-start">
               {/* Left: avatar initial + name input */}
-              <div className="flex-1 space-y-3">
+              <div className="flex-1 w-full space-y-3">
                 <div className="flex items-center gap-4">
-                  <Avatar className="h-14 w-14 shrink-0">
-                    <AvatarFallback className="bg-primary/10 text-primary text-lg">
+                  <Avatar className="h-14 w-14 shrink-0 border">
+                    <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
                       {name?.charAt(0)?.toUpperCase() || user.email?.charAt(0)?.toUpperCase() || 'U'}
                     </AvatarFallback>
                   </Avatar>
@@ -105,12 +117,13 @@ export default function Profile() {
                   disabled={!name.trim()}
                   className="gap-2 text-xs"
                 >
-                  👋 Fingerspell my name
+                  <Hand className="w-3.5 h-3.5" />
+                  Fingerspell my name
                 </Button>
               </div>
 
               {/* Right: compact avatar */}
-              <div className="shrink-0 w-40 rounded-xl overflow-hidden border border-border bg-muted/20" style={{ height: '160px' }}>
+              <div className="shrink-0 w-full sm:w-40 rounded-2xl overflow-hidden border border-border bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800" style={{ height: '160px' }}>
                 <SignAvatar
                   glossSequence={glossSequence}
                   isPlaying={isPlaying}
@@ -127,9 +140,12 @@ export default function Profile() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle>Preferences</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-primary" />
+              Preferences
+            </CardTitle>
             <CardDescription>Manage your app experience and defaults.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -156,7 +172,7 @@ export default function Profile() {
           </CardContent>
         </Card>
 
-        <Card className="border-destructive/20 bg-destructive/5">
+        <Card className="rounded-2xl border-destructive/20 bg-destructive/5">
           <CardHeader>
             <CardTitle className="text-destructive">Session</CardTitle>
             <CardDescription>Sign out of your account on this device.</CardDescription>

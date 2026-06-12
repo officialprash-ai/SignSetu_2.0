@@ -3,7 +3,32 @@
 
 @custom-variant dark (&:is(.dark *));
 
+.loader {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  animation: loader-spin 0.7s linear infinite;
+}
+
+@keyframes loader-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spotlight {
+  0% {
+    opacity: 0;
+    transform: translate(-72%, -62%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -40%) scale(1);
+  }
+}
+
 @theme inline {
+  --animate-spotlight: spotlight 2s ease 0.75s 1 forwards;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -53,10 +78,10 @@
   --chart-3: oklch(0.5 0.22 259.815);
   --chart-4: oklch(0.45 0.2 259.815);
   --chart-5: oklch(0.4 0.18 259.815);
-  --radius: 0.75rem;
+  --radius: 1rem;
   --background: oklch(0.99 0.001 0);
   --foreground: oklch(0.15 0.01 65);
-  --card: oklch(1 0 0);
+  --card: oklch(1 0 0 / 0.62);
   --card-foreground: oklch(0.15 0.01 65);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.15 0.01 65);
@@ -86,7 +111,7 @@
   --sidebar-primary-foreground: oklch(1 0 0);
   --background: oklch(0.08 0.005 0);
   --foreground: oklch(0.95 0.005 65);
-  --card: oklch(0.12 0.005 0);
+  --card: oklch(0.18 0.012 265 / 0.55);
   --card-foreground: oklch(0.95 0.005 65);
   --popover: oklch(0.12 0.005 0);
   --popover-foreground: oklch(0.95 0.005 65);
@@ -119,16 +144,25 @@
     @apply border-border outline-ring/50;
   }
   html {
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Poppins', system-ui, sans-serif;
+    font-family: 'Sora', system-ui, sans-serif;
     font-weight: 700;
+    letter-spacing: -0.02em;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
     font-weight: 400;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.2px;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(60% 55% at 12% 0%, oklch(0.55 0.24 259.815 / 0.10), transparent 70%),
+      radial-gradient(55% 55% at 100% 100%, oklch(0.65 0.18 290 / 0.10), transparent 70%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -144,6 +178,20 @@
 }
 
 @layer components {
+  /* Frosted glass surface — reuse on custom panels */
+  .glass {
+    background-color: color-mix(in oklch, var(--card) 100%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid;
+    border-color: oklch(1 0 0 / 0.5);
+    box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.18);
+  }
+  .dark .glass {
+    border-color: oklch(1 0 0 / 0.1);
+    box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.6);
+  }
+
   /**
    * Custom container utility that centers content and adds responsive padding.
    *

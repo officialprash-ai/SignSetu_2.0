@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Landing from "./pages/Landing";
 import Home from "./pages/Home";
+import Login from "./pages/Login";
 import { useAuth } from "./_core/hooks/useAuth";
 
 function Router() {
@@ -22,6 +23,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={isAuthenticated ? Home : Landing} />
+      <Route path="/login" component={isAuthenticated ? Home : Login} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

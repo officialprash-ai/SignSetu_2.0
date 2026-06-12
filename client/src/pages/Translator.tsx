@@ -1,26 +1,36 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearch } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
-import { Input } from '@/components/ui/input';
-import { Loader2, Pause, Play, RotateCcw, Youtube, X, Lightbulb } from 'lucide-react';
+import { Loader2, Pause, Play, RotateCcw, Youtube, X, Lightbulb, Upload, FileVideo, CornerRightUp } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { SignAvatar, type GlossEntry } from '@/components/SignAvatarLazy';
 import { AudioRecorder } from '@/components/AudioRecorder';
+import { AIInput } from '@/components/ui/ai-input';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-type InputTab = 'text' | 'voice' | 'youtube';
+type InputTab = 'text' | 'voice' | 'youtube' | 'file';
 
 const TIP_KEY = 'signsetu_tip_dismissed';
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // Whisper hard limit
 
-const EXAMPLE_PHRASES = [
-  'Hello, how are you?',
-  'Thank you for your help.',
-  'I love learning sign language.',
-  'Good morning, have a great day!',
-];
+// Greeting the avatar performs on load / language switch
+function buildGreeting(lang: 'ASL' | 'ISL'): GlossEntry[] {
+  const gloss = lang === 'ISL' ? 'NAMASTE' : 'HELLO';
+  return [{ gloss, startMs: 300, endMs: 1900, confidence: 1 }];
+}
+
+// Chunked Uint8Array → base64 (avoids stack overflow on large files)
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 function OnboardingTip({ onDismiss }: { onDismiss: () => void }) {
   return (
@@ -29,11 +39,7 @@ function OnboardingTip({ onDismiss }: { onDismiss: () => void }) {
       <div className="flex-1 space-y-1">
         <p className="font-medium text-foreground">Getting started</p>
         <p className="text-muted-foreground text-xs">
-          Type a phrase, record your voice, or paste a YouTube URL. The 3D avatar will sign it back to you in real time.
-          Try: <button
-            className="underline underline-offset-2 hover:text-primary transition-colors"
-            onClick={onDismiss}
-          >"Hello, how are you?"</button>
+          Type a phrase, record your voice, upload a video, or paste a YouTube URL. The 3D avatar signs it back to you in real time.
         </p>
       </div>
       <button onClick={onDismiss} className="text-muted-foreground hover:text-foreground transition-colors shrink-0" aria-label="Dismiss tip">
@@ -43,31 +49,15 @@ function OnboardingTip({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function AvatarIdleState({ onTryExample }: { onTryExample: (phrase: string) => void }) {
+function AvatarIdleState() {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-8 text-center">
+    <div className="flex flex-col items-center justify-center h-full gap-4 px-6 py-8 text-center">
       <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
         <span className="text-3xl">🤟</span>
       </div>
       <div className="space-y-1.5">
         <p className="font-semibold text-foreground">Avatar ready</p>
-        <p className="text-sm text-muted-foreground">
-          Translate something to see it signed here
-        </p>
-      </div>
-      <div className="w-full space-y-2">
-        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Try an example</p>
-        <div className="grid grid-cols-1 gap-1.5">
-          {EXAMPLE_PHRASES.map(phrase => (
-            <button
-              key={phrase}
-              onClick={() => onTryExample(phrase)}
-              className="w-full text-left text-xs px-3 py-2 rounded-lg border border-border hover:border-primary/40 hover:bg-primary/5 transition-colors text-muted-foreground hover:text-foreground truncate"
-            >
-              {phrase}
-            </button>
-          ))}
-        </div>
+        <p className="text-sm text-muted-foreground">Translate something to see it signed here</p>
       </div>
     </div>
   );
@@ -85,12 +75,15 @@ export default function Translator() {
   const [playbackSpeed, setPlaybackSpeed]   = useState(1);
   const [activeGlossIdx, setActiveGlossIdx] = useState(-1);
   const [replayKey, setReplayKey]           = useState(0);
+  const [fileName, setFileName]             = useState('');
   const [showTip, setShowTip]               = useState(() => {
     try { return !localStorage.getItem(TIP_KEY); } catch { return true; }
   });
+  const greetedRef                          = useRef(false);
 
   const textToSignMutation  = trpc.translation.textToSign.useMutation();
   const youtubeMutation     = trpc.youtube.transcribe.useMutation();
+  const fileMutation        = trpc.voice.transcribe.useMutation();
   const prefsQuery          = trpc.preferences.get.useQuery();
   const prefsMutation       = trpc.preferences.set.useMutation();
 
@@ -120,6 +113,7 @@ export default function Translator() {
     const replayText = params.get('replay');
     const replayLang = params.get('lang') as 'ASL' | 'ISL' | null;
     if (replayText) {
+      greetedRef.current = true;
       setInputText(replayText);
       setInputTab('text');
       if (replayLang === 'ASL' || replayLang === 'ISL') setLanguage(replayLang);
@@ -129,6 +123,14 @@ export default function Translator() {
         }).catch(() => {});
       }, 100);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Avatar greets on first load (Namaste for ISL, Hello for ASL)
+  useEffect(() => {
+    if (greetedRef.current) return;
+    greetedRef.current = true;
+    applyResult(buildGreeting(language));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -180,26 +182,41 @@ export default function Translator() {
     try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ }
   };
 
-  const handleTryExample = async (phrase: string) => {
-    handleDismissTip();
-    setInputText(phrase);
-    setInputTab('text');
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > MAX_FILE_BYTES) {
+      toast.error('File too large — max 25 MB'); return;
+    }
+    setFileName(file.name);
     try {
-      const result = await textToSignMutation.mutateAsync({ text: phrase, language });
+      toast.info('Extracting audio & transcribing — this may take a moment…');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const audioBase64 = bytesToBase64(bytes);
+      const { text } = await fileMutation.mutateAsync({
+        audioBase64,
+        mimeType: file.type || 'video/mp4',
+        language: 'en',
+      });
+      if (!text.trim()) { toast.error('No speech detected in file'); return; }
+      setInputText(text);
+      const result = await textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' });
       applyResult(result.glossSequence);
-      toast.success('Translation complete!');
-    } catch { toast.error('Failed to translate'); }
+      toast.success('File translated!');
+    } catch {
+      toast.error('Failed to process file');
+    }
   };
 
   const totalDurationS = glossSequence.length > 0
     ? ((glossSequence[glossSequence.length - 1]?.endMs ?? 0) / 1000).toFixed(1)
     : '0';
 
-  const isPending = textToSignMutation.isPending || youtubeMutation.isPending;
+  const isPending = textToSignMutation.isPending || youtubeMutation.isPending || fileMutation.isPending;
 
   const TABS: { id: InputTab; label: string }[] = [
     { id: 'text',    label: 'Text'    },
     { id: 'voice',   label: 'Voice'   },
+    { id: 'file',    label: 'Upload'  },
     { id: 'youtube', label: 'YouTube' },
   ];
 
@@ -221,7 +238,7 @@ export default function Translator() {
               {(['ASL', 'ISL'] as const).map(lang => (
                 <button
                   key={lang}
-                  onClick={() => { setLanguage(lang); setGlossSequence([]); setIsPlaying(false); persistPrefs(lang, playbackSpeed); }}
+                  onClick={() => { setLanguage(lang); applyResult(buildGreeting(lang)); persistPrefs(lang, playbackSpeed); }}
                   className={cn(
                     'flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors',
                     language === lang
@@ -255,13 +272,15 @@ export default function Translator() {
 
             {inputTab === 'text' && (
               <div className="space-y-3">
-                <textarea
+                <AIInput
                   value={inputText}
-                  onChange={e => setInputText(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleTranslate(); }}
-                  placeholder="Type something to translate…  (⌘↵ to translate)"
-                  rows={4}
-                  className="w-full p-3 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm"
+                  onChange={setInputText}
+                  onSubmit={() => handleTranslate()}
+                  onMic={() => setInputTab('voice')}
+                  disabled={isPending}
+                  placeholder="Type something to translate…  (Enter to translate, Shift+Enter for newline)"
+                  minHeight={64}
+                  maxHeight={200}
                 />
                 <Button onClick={handleTranslate} disabled={isPending || !inputText.trim()} className="w-full">
                   {textToSignMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -295,22 +314,79 @@ export default function Translator() {
               </div>
             )}
 
+            {inputTab === 'file' && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Upload a video or audio file from your device — audio extracted, transcribed, and signed.
+                </p>
+                <label
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-2 w-full rounded-xl border-2 border-dashed border-border px-4 py-8 text-center transition-colors',
+                    isPending ? 'opacity-60 pointer-events-none' : 'cursor-pointer hover:border-primary/50 hover:bg-primary/5'
+                  )}
+                >
+                  <input
+                    type="file"
+                    accept="video/*,audio/*"
+                    className="hidden"
+                    disabled={isPending}
+                    onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
+                  />
+                  {fileMutation.isPending
+                    ? <Loader2 className="w-7 h-7 text-primary animate-spin" />
+                    : <Upload className="w-7 h-7 text-muted-foreground" />}
+                  <span className="text-sm font-medium text-foreground">
+                    {fileMutation.isPending ? 'Processing…' : 'Click to choose a file'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">MP4, MOV, WEBM, MP3, WAV · max 25 MB</span>
+                </label>
+                {fileName && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <FileVideo className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{fileName}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {inputTab === 'youtube' && (
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
                   Paste a YouTube URL — audio extracted, transcribed, and signed.
                 </p>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Youtube className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      value={youtubeUrl}
-                      onChange={e => setYoutubeUrl(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleYoutube(); }}
-                      placeholder="https://youtube.com/watch?v=…"
-                      className="pl-9 text-sm"
-                    />
-                  </div>
+                <div className="relative w-full">
+                  <Youtube className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={e => setYoutubeUrl(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleYoutube(); }}
+                    disabled={isPending}
+                    placeholder="https://youtube.com/watch?v=…"
+                    className={cn(
+                      'w-full h-14 rounded-2xl bg-muted/60 border border-border',
+                      'pl-11 pr-14 text-sm text-foreground placeholder:text-muted-foreground',
+                      'outline-none transition-[box-shadow,border-color] duration-150',
+                      'focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary/50',
+                      'disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleYoutube}
+                    disabled={isPending || !youtubeUrl.trim()}
+                    aria-label="Translate YouTube video"
+                    className={cn(
+                      'absolute top-1/2 -translate-y-1/2 right-3 flex items-center justify-center',
+                      'h-9 w-9 rounded-xl bg-primary text-primary-foreground shadow-sm',
+                      'transition-all duration-200 hover:opacity-90',
+                      youtubeUrl.trim() ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+                    )}
+                  >
+                    {youtubeMutation.isPending
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <CornerRightUp className="w-4 h-4" />}
+                  </button>
                 </div>
                 <Button onClick={handleYoutube} disabled={isPending || !youtubeUrl.trim()} className="w-full">
                   {youtubeMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -340,7 +416,7 @@ export default function Translator() {
                   onAnimationComplete={handleAnimationComplete}
                 />
               ) : (
-                <AvatarIdleState onTryExample={handleTryExample} />
+                <AvatarIdleState />
               )}
             </div>
 

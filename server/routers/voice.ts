@@ -75,6 +75,12 @@ function mimeToExt(mime: string): string {
     'audio/mpeg': 'mp3',
     'audio/wav':  'wav',
     'audio/wave': 'wav',
+    // video containers — Whisper extracts the audio track
+    'video/mp4':       'mp4',
+    'video/webm':      'webm',
+    'video/quicktime': 'mp4',
+    'video/x-m4v':     'mp4',
+    'video/mpeg':      'mpeg',
   };
   return map[mime] ?? 'webm';
 }
