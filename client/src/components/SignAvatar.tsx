@@ -4,6 +4,7 @@ import { Environment, OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 export interface GlossEntry {
   gloss: string;
@@ -337,28 +338,41 @@ function GLBAvatar({
     actionsRef.current.clear();
     const entries = Object.entries(SIGN_CLIPS[language] ?? {});
     if (entries.length === 0) return; // dormant — pure procedural
-    // Build norm->realBoneName map so Mixamo/other clips retarget onto this rig
+    // Build norm->realBoneName map so Mixamo/StudioGalt clips retarget onto this rig
     const nameByNorm = new Map<string, string>();
     cloned.traverse(o => { if ((o as THREE.Bone).isBone) nameByNorm.set(normBone(o.name), o.name); });
-    const loader = new GLTFLoader();
     let cancelled = false;
+
+    const ingest = (gloss: string, animations: THREE.AnimationClip[]) => {
+      if (cancelled || !animations.length) return;
+      const clip = animations[0];
+      // Keep rotation-only tracks (drop root position/scale -> no body fling / scale issues),
+      // and retarget node names to this skeleton's actual bone names.
+      clip.tracks = clip.tracks.filter(t => {
+        const dot = t.name.indexOf('.');
+        if (dot < 0) return false;
+        const prop = t.name.slice(dot + 1);
+        if (!prop.startsWith('quaternion') && !prop.startsWith('rotation')) return false;
+        const real = nameByNorm.get(normBone(t.name.slice(0, dot)));
+        if (real) t.name = real + '.' + prop;
+        return !!real;
+      });
+      if (clip.tracks.length === 0) return; // nothing retargeted -> procedural fallback
+      const action = mixer.clipAction(clip);
+      action.clampWhenFinished = true;
+      action.setLoop(THREE.LoopOnce, 1);
+      actionsRef.current.set(gloss.toUpperCase(), action);
+    };
+
+    const onErr = () => {/* ignore -> procedural fallback */};
+    const gltf = new GLTFLoader();
+    const fbx  = new FBXLoader();
     entries.forEach(([gloss, url]) => {
-      loader.load(url, gltf => {
-        if (cancelled || !gltf.animations.length) return;
-        const clip = gltf.animations[0];
-        // Retarget track node names to this skeleton's actual bone names
-        clip.tracks.forEach(t => {
-          const dot = t.name.indexOf('.');
-          if (dot < 0) return;
-          const node = t.name.slice(0, dot);
-          const real = nameByNorm.get(normBone(node));
-          if (real) t.name = real + t.name.slice(dot);
-        });
-        const action = mixer.clipAction(clip);
-        action.clampWhenFinished = true;
-        action.setLoop(THREE.LoopOnce, 1);
-        actionsRef.current.set(gloss.toUpperCase(), action);
-      }, undefined, () => {/* ignore clip load error -> procedural fallback */});
+      if (url.toLowerCase().endsWith('.fbx')) {
+        fbx.load(url, obj => ingest(gloss, obj.animations), undefined, onErr);
+      } else {
+        gltf.load(url, g => ingest(gloss, g.animations), undefined, onErr);
+      }
     });
     return () => { cancelled = true; };
   }, [cloned, mixer, language]);
@@ -557,7 +571,14 @@ const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
 //   HELLO: '/clips/hello.glb',
 // Free source: mixamo.com (download "With Skin" off / animation-only FBX -> GLB).
 // Per-language clip registry. Accurate motion clips drop in here by gloss; missing
-// glosses fall back to the procedural engine. e.g. ASL: { HELLO: '/clips/asl/hello.glb' }
+// glosses fall back to the procedural engine. Supports .glb AND .fbx.
+//
+// ASL clips: StudioGalt Sign-Language-Mocap-Archive (CC0). Use the "No Mesh Mixamo"
+// FBX files (animation on a Mixamo rig) — they retarget cleanly onto this avatar.
+// 1) Download the sign's "No Mesh Mixamo" .fbx
+// 2) Put it in client/public/clips/asl/<sign>.fbx
+// 3) Map the gloss below, e.g.:
+//    ASL: { HELLO: '/clips/asl/hello.fbx', 'THANK-YOU': '/clips/asl/thankyou.fbx' }
 export const SIGN_CLIPS: Record<SignLang, Record<string, string>> = {
   ASL: {},
   ISL: {},
