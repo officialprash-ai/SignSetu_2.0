@@ -254,30 +254,154 @@ export default function Translator() {
 
       {showTip && <OnboardingTip onDismiss={handleDismissTip} />}
 
+      {/* Top: Avatar (left) + Video (right) */}
       <div className="grid lg:grid-cols-2 gap-8 items-start">
-        {/* ── Left: Input Panel ── */}
+        {/* ── Left: Avatar Panel ── */}
         <div className="space-y-4">
-          <Card className="p-5 space-y-3">
-            <label className="text-sm font-semibold">Sign Language</label>
-            <div className="flex gap-2">
-              {(['ASL', 'ISL'] as const).map(lang => (
-                <button
-                  key={lang}
-                  onClick={() => { setLanguage(lang); applyResult(buildGreeting(lang)); persistPrefs(lang, playbackSpeed); }}
-                  className={cn(
-                    'flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors',
-                    language === lang
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-border hover:bg-muted'
-                  )}
+          <Card className="p-5 space-y-4">
+            <div className="h-72 sm:h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+              {glossSequence.length > 0 || isPending ? (
+                <SignAvatar
+                  key={replayKey}
+                  glossSequence={glossSequence}
+                  isPlaying={isPlaying}
+                  playbackSpeed={playbackSpeed}
+                  onGlossChange={setActiveGlossIdx}
+                  onAnimationComplete={handleAnimationComplete}
+                />
+              ) : (
+                <AvatarIdleState />
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setIsPlaying(p => !p)}
+                  variant="outline" className="flex-1"
+                  disabled={glossSequence.length === 0}
                 >
-                  {lang === 'ASL' ? '🇺🇸 ASL' : '🇮🇳 ISL'}
-                </button>
-              ))}
+                  {isPlaying
+                    ? <><Pause className="w-4 h-4 mr-2" />Pause</>
+                    : <><Play  className="w-4 h-4 mr-2" />Play</>
+                  }
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={handleReplay} disabled={glossSequence.length === 0}>
+                  <RotateCcw className="w-4 h-4 mr-2" />Replay
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
+                </div>
+                <Slider
+                  min={0.5} max={2} step={0.1}
+                  value={[playbackSpeed]}
+                  onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>0.5×</span><span>2×</span>
+                </div>
+              </div>
             </div>
           </Card>
 
-          <Card className="p-5 space-y-4">
+          {glossSequence.length > 0 && (
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sm">Gloss Sequence</h3>
+                <span className="text-xs text-muted-foreground">
+                  {glossSequence.length} signs · {totalDurationS}s
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {glossSequence.map((g, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      'px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-200',
+                      idx === activeGlossIdx
+                        ? 'bg-primary text-primary-foreground border-primary scale-110 shadow-sm'
+                        : 'bg-primary/10 text-primary border-primary/20'
+                    )}
+                  >
+                    {g.gloss}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        {/* ── Right: Video Panel ── */}
+        <div className="space-y-4">
+          {videoUrl ? (
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sm">Uploaded Video</h3>
+                <span className="text-xs text-muted-foreground">Plays in sync with the avatar</span>
+              </div>
+              <div className="relative rounded-lg overflow-hidden bg-black">
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  className="w-full max-h-[26rem] object-contain bg-black"
+                  onPlay={handleVideoPlay}
+                  onPause={handleVideoPause}
+                  onSeeked={handleVideoSeeked}
+                />
+                {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+                  <div className="absolute bottom-12 left-0 right-0 flex justify-center pointer-events-none">
+                    <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                      {glossSequence[activeGlossIdx].gloss}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Press play on the video — the avatar signs along with it.
+              </p>
+            </Card>
+          ) : (
+            <Card className="p-5">
+              <div className="h-72 sm:h-96 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center gap-3 text-center px-6">
+                <FileVideo className="w-9 h-9 text-muted-foreground" />
+                <p className="text-sm font-medium text-foreground">No video uploaded</p>
+                <p className="text-xs text-muted-foreground">
+                  Use the <span className="font-medium text-foreground">Upload</span> tab below to add a video — it plays here in sync with the avatar.
+                </p>
+              </div>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Below: Input section */}
+      <div className="space-y-4">
+        <Card className="p-5 space-y-3">
+          <label className="text-sm font-semibold">Sign Language</label>
+          <div className="flex gap-2">
+            {(['ASL', 'ISL'] as const).map(lang => (
+              <button
+                key={lang}
+                onClick={() => { setLanguage(lang); applyResult(buildGreeting(lang)); persistPrefs(lang, playbackSpeed); }}
+                className={cn(
+                  'flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors',
+                  language === lang
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border hover:bg-muted'
+                )}
+              >
+                {lang === 'ASL' ? '🇺🇸 ASL' : '🇮🇳 ISL'}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-5 space-y-4">
             <div className="flex gap-1 p-1 rounded-lg bg-muted">
               {TABS.map(tab => (
                 <button
@@ -426,117 +550,6 @@ export default function Translator() {
             )}
           </Card>
         </div>
-
-        {/* ── Right: Video + Avatar Panel ── */}
-        <div className="space-y-4">
-          {videoUrl && (
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Uploaded Video</h3>
-                <span className="text-xs text-muted-foreground">Plays in sync with the avatar</span>
-              </div>
-              <div className="relative rounded-lg overflow-hidden bg-black">
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  controls
-                  playsInline
-                  className="w-full max-h-72 object-contain bg-black"
-                  onPlay={handleVideoPlay}
-                  onPause={handleVideoPause}
-                  onSeeked={handleVideoSeeked}
-                />
-                {/* live sign subtitle */}
-                {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
-                  <div className="absolute bottom-12 left-0 right-0 flex justify-center pointer-events-none">
-                    <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
-                      {glossSequence[activeGlossIdx].gloss}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Press play on the video — the avatar signs along with it.
-              </p>
-            </Card>
-          )}
-
-          <Card className="p-5 space-y-4">
-            <div className="h-72 sm:h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-              {glossSequence.length > 0 || isPending ? (
-                <SignAvatar
-                  key={replayKey}
-                  glossSequence={glossSequence}
-                  isPlaying={isPlaying}
-                  playbackSpeed={playbackSpeed}
-                  onGlossChange={setActiveGlossIdx}
-                  onAnimationComplete={handleAnimationComplete}
-                />
-              ) : (
-                <AvatarIdleState />
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => setIsPlaying(p => !p)}
-                  variant="outline" className="flex-1"
-                  disabled={glossSequence.length === 0}
-                >
-                  {isPlaying
-                    ? <><Pause className="w-4 h-4 mr-2" />Pause</>
-                    : <><Play  className="w-4 h-4 mr-2" />Play</>
-                  }
-                </Button>
-                <Button variant="outline" className="flex-1" onClick={handleReplay} disabled={glossSequence.length === 0}>
-                  <RotateCcw className="w-4 h-4 mr-2" />Replay
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
-                </div>
-                <Slider
-                  min={0.5} max={2} step={0.1}
-                  value={[playbackSpeed]}
-                  onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>0.5×</span><span>2×</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {glossSequence.length > 0 && (
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Gloss Sequence</h3>
-                <span className="text-xs text-muted-foreground">
-                  {glossSequence.length} signs · {totalDurationS}s
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {glossSequence.map((g, idx) => (
-                  <div
-                    key={idx}
-                    className={cn(
-                      'px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-200',
-                      idx === activeGlossIdx
-                        ? 'bg-primary text-primary-foreground border-primary scale-110 shadow-sm'
-                        : 'bg-primary/10 text-primary border-primary/20'
-                    )}
-                  >
-                    {g.gloss}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

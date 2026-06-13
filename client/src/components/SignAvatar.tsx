@@ -179,28 +179,39 @@ const BONE_ALIASES: Record<string, string[]> = {
   // Fingers (index, middle, ring, pinky) – proximal & mid phalanges
   LI1:  ['LeftHandIndex1','mixamorigLeftHandIndex1'],
   LI2:  ['LeftHandIndex2','mixamorigLeftHandIndex2'],
+  LI3:  ['LeftHandIndex3','mixamorigLeftHandIndex3'],
   LM1:  ['LeftHandMiddle1','mixamorigLeftHandMiddle1'],
   LM2:  ['LeftHandMiddle2','mixamorigLeftHandMiddle2'],
+  LM3:  ['LeftHandMiddle3','mixamorigLeftHandMiddle3'],
   LR1:  ['LeftHandRing1','mixamorigLeftHandRing1'],
   LR2:  ['LeftHandRing2','mixamorigLeftHandRing2'],
+  LR3:  ['LeftHandRing3','mixamorigLeftHandRing3'],
   LP1:  ['LeftHandPinky1','mixamorigLeftHandPinky1'],
   LP2:  ['LeftHandPinky2','mixamorigLeftHandPinky2'],
+  LP3:  ['LeftHandPinky3','mixamorigLeftHandPinky3'],
 
   RI1:  ['RightHandIndex1','mixamorigRightHandIndex1'],
   RI2:  ['RightHandIndex2','mixamorigRightHandIndex2'],
+  RI3:  ['RightHandIndex3','mixamorigRightHandIndex3'],
   RM1:  ['RightHandMiddle1','mixamorigRightHandMiddle1'],
   RM2:  ['RightHandMiddle2','mixamorigRightHandMiddle2'],
+  RM3:  ['RightHandMiddle3','mixamorigRightHandMiddle3'],
   RR1:  ['RightHandRing1','mixamorigRightHandRing1'],
   RR2:  ['RightHandRing2','mixamorigRightHandRing2'],
+  RR3:  ['RightHandRing3','mixamorigRightHandRing3'],
   RP1:  ['RightHandPinky1','mixamorigRightHandPinky1'],
   RP2:  ['RightHandPinky2','mixamorigRightHandPinky2'],
+  RP3:  ['RightHandPinky3','mixamorigRightHandPinky3'],
 
   LT1:  ['LeftHandThumb1','mixamorigLeftHandThumb1'],
   LT2:  ['LeftHandThumb2','mixamorigLeftHandThumb2'],
+  LT3:  ['LeftHandThumb3','mixamorigLeftHandThumb3'],
   RT1:  ['RightHandThumb1','mixamorigRightHandThumb1'],
   RT2:  ['RightHandThumb2','mixamorigRightHandThumb2'],
+  RT3:  ['RightHandThumb3','mixamorigRightHandThumb3'],
 
   Spine: ['Spine','Spine1','mixamorigSpine'],
+  Neck:  ['Neck','mixamorigNeck'],
   Head:  ['Head','mixamorigHead'],
 };
 
@@ -401,6 +412,20 @@ function GLBAvatar({
       mixer.update(delta * playbackSpeed); // clip drives the bones
     } else {
       applyPose(poseRef.current, B, alpha); // procedural fallback
+      // Head/neck life while signing — gentle nod + tilt for natural expression
+      const nod  = Math.sin(idleRef.current * 2.3) * 0.05;
+      const tilt = Math.sin(idleRef.current * 1.4) * 0.045;
+      const head = findBone(B, 'Head');
+      if (head) {
+        const hr = boneRest(head);
+        head.rotation.x += (hr.x + 0.05 + nod - head.rotation.x) * 0.09;
+        head.rotation.z += (hr.z + tilt - head.rotation.z) * 0.09;
+      }
+      const neck = findBone(B, 'Neck');
+      if (neck) {
+        const nr = boneRest(neck);
+        neck.rotation.x += (nr.x + nod * 0.5 - neck.rotation.x) * 0.06;
+      }
     }
   });
 
@@ -419,6 +444,7 @@ function GLBAvatar({
 // ─── Bone animation ───────────────────────────────────────────────────────────
 const MAX_PROX = 1.1; // radians, finger proximal curl
 const MAX_MID  = 0.85;
+const MAX_DIST = 0.7; // distal (3rd) joint curl — adds natural finger articulation
 
 function applyPose(pose: FullPose, B: Map<string, THREE.Bone>, a: number) {
   const { L, R } = pose;
@@ -431,23 +457,25 @@ function applyPose(pose: FullPose, B: Map<string, THREE.Bone>, a: number) {
   lerpBone(findBone(B,'LeftHand'),    L.wrist[0], L.wrist[1], L.wrist[2], a);
   lerpBone(findBone(B,'RightHand'),   R.wrist[0], R.wrist[1], R.wrist[2], a);
 
-  // Left fingers [index, middle, ring, pinky]
+  // Left fingers [index, middle, ring, pinky] — proximal, mid, distal joints
   const lf = L.hand.fingers;
-  lerpBoneX(findBone(B,'LI1'), -lf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'LI2'), -lf[0]*MAX_MID, a);
-  lerpBoneX(findBone(B,'LM1'), -lf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'LM2'), -lf[1]*MAX_MID, a);
-  lerpBoneX(findBone(B,'LR1'), -lf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'LR2'), -lf[2]*MAX_MID, a);
-  lerpBoneX(findBone(B,'LP1'), -lf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'LP2'), -lf[3]*MAX_MID, a);
+  lerpBoneX(findBone(B,'LI1'), -lf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'LI2'), -lf[0]*MAX_MID, a); lerpBoneX(findBone(B,'LI3'), -lf[0]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'LM1'), -lf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'LM2'), -lf[1]*MAX_MID, a); lerpBoneX(findBone(B,'LM3'), -lf[1]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'LR1'), -lf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'LR2'), -lf[2]*MAX_MID, a); lerpBoneX(findBone(B,'LR3'), -lf[2]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'LP1'), -lf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'LP2'), -lf[3]*MAX_MID, a); lerpBoneX(findBone(B,'LP3'), -lf[3]*MAX_DIST, a);
   lerpBoneX(findBone(B,'LT1'), L.hand.thumb*0.5 - 0.1, a);
   lerpBoneX(findBone(B,'LT2'), L.hand.thumb*0.4, a);
+  lerpBoneX(findBone(B,'LT3'), L.hand.thumb*0.3, a);
 
   // Right fingers
   const rf = R.hand.fingers;
-  lerpBoneX(findBone(B,'RI1'), -rf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'RI2'), -rf[0]*MAX_MID, a);
-  lerpBoneX(findBone(B,'RM1'), -rf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'RM2'), -rf[1]*MAX_MID, a);
-  lerpBoneX(findBone(B,'RR1'), -rf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'RR2'), -rf[2]*MAX_MID, a);
-  lerpBoneX(findBone(B,'RP1'), -rf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'RP2'), -rf[3]*MAX_MID, a);
+  lerpBoneX(findBone(B,'RI1'), -rf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'RI2'), -rf[0]*MAX_MID, a); lerpBoneX(findBone(B,'RI3'), -rf[0]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'RM1'), -rf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'RM2'), -rf[1]*MAX_MID, a); lerpBoneX(findBone(B,'RM3'), -rf[1]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'RR1'), -rf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'RR2'), -rf[2]*MAX_MID, a); lerpBoneX(findBone(B,'RR3'), -rf[2]*MAX_DIST, a);
+  lerpBoneX(findBone(B,'RP1'), -rf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'RP2'), -rf[3]*MAX_MID, a); lerpBoneX(findBone(B,'RP3'), -rf[3]*MAX_DIST, a);
   lerpBoneX(findBone(B,'RT1'), R.hand.thumb*0.5 - 0.1, a);
   lerpBoneX(findBone(B,'RT2'), R.hand.thumb*0.4, a);
+  lerpBoneX(findBone(B,'RT3'), R.hand.thumb*0.3, a);
 }
 
 function lerpBoneX(bone: THREE.Bone | null, target: number, a: number) {
