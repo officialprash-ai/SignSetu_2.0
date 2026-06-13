@@ -333,12 +333,19 @@ function GLBAvatar({
   const actionsRef       = useRef<Map<string, THREE.AnimationAction>>(new Map());
   const currentActionRef = useRef<THREE.AnimationAction | null>(null);
   const clipPlayingRef   = useRef(false);
+  const attemptedRef     = useRef<Set<string>>(new Set());
 
+  // Reset cached clips when the avatar model or language changes
   useEffect(() => {
     actionsRef.current.clear();
-    const entries = Object.entries(SIGN_CLIPS[language] ?? {});
-    if (entries.length === 0) return; // dormant — pure procedural
-    // Build norm->realBoneName map so Mixamo/StudioGalt clips retarget onto this rig
+    attemptedRef.current.clear();
+  }, [cloned, language]);
+
+  // Auto-load a real motion clip per gloss in the current sequence.
+  // Resolution: explicit SIGN_CLIPS[lang][GLOSS] override, else convention
+  //   /clips/<lang>/<GLOSS>.fbx   (drop StudioGalt "No Mesh Mixamo" FBX there).
+  // Missing file -> silently stays procedural.
+  useEffect(() => {
     const nameByNorm = new Map<string, string>();
     cloned.traverse(o => { if ((o as THREE.Bone).isBone) nameByNorm.set(normBone(o.name), o.name); });
     let cancelled = false;
@@ -346,8 +353,8 @@ function GLBAvatar({
     const ingest = (gloss: string, animations: THREE.AnimationClip[]) => {
       if (cancelled || !animations.length) return;
       const clip = animations[0];
-      // Keep rotation-only tracks (drop root position/scale -> no body fling / scale issues),
-      // and retarget node names to this skeleton's actual bone names.
+      // Keep rotation-only tracks (drop root position/scale -> no fling/rescale),
+      // retarget node names (mixamorig*/suffixed) onto this skeleton's bones.
       clip.tracks = clip.tracks.filter(t => {
         const dot = t.name.indexOf('.');
         if (dot < 0) return false;
@@ -357,17 +364,23 @@ function GLBAvatar({
         if (real) t.name = real + '.' + prop;
         return !!real;
       });
-      if (clip.tracks.length === 0) return; // nothing retargeted -> procedural fallback
+      if (clip.tracks.length === 0) return;
       const action = mixer.clipAction(clip);
       action.clampWhenFinished = true;
       action.setLoop(THREE.LoopOnce, 1);
-      actionsRef.current.set(gloss.toUpperCase(), action);
+      actionsRef.current.set(gloss, action);
     };
 
-    const onErr = () => {/* ignore -> procedural fallback */};
+    const onErr = () => {/* missing/failed clip -> procedural fallback */};
     const gltf = new GLTFLoader();
     const fbx  = new FBXLoader();
-    entries.forEach(([gloss, url]) => {
+    const lang = language.toLowerCase();
+    const glosses = Array.from(new Set(glossSequence.map(g => g.gloss.toUpperCase())));
+    glosses.forEach(gloss => {
+      if (attemptedRef.current.has(gloss) || actionsRef.current.has(gloss)) return;
+      attemptedRef.current.add(gloss);
+      const explicit = SIGN_CLIPS[language]?.[gloss];
+      const url = explicit ?? `/clips/${lang}/${encodeURIComponent(gloss)}.fbx`;
       if (url.toLowerCase().endsWith('.fbx')) {
         fbx.load(url, obj => ingest(gloss, obj.animations), undefined, onErr);
       } else {
@@ -375,7 +388,7 @@ function GLBAvatar({
       }
     });
     return () => { cancelled = true; };
-  }, [cloned, mixer, language]);
+  }, [cloned, mixer, language, glossSequence]);
 
   const stopClip = () => {
     if (currentActionRef.current) { currentActionRef.current.fadeOut(0.12); currentActionRef.current = null; }
@@ -570,15 +583,15 @@ const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
 // retarget cleanly onto this avatar. Add entries as you acquire clips, e.g.:
 //   HELLO: '/clips/hello.glb',
 // Free source: mixamo.com (download "With Skin" off / animation-only FBX -> GLB).
-// Per-language clip registry. Accurate motion clips drop in here by gloss; missing
-// glosses fall back to the procedural engine. Supports .glb AND .fbx.
+// ── Real motion clips (zero-config, drop-in) ─────────────────────────────────
+// Clips auto-load by gloss name — NO mapping needed for the common case:
+//   put  client/public/clips/asl/HELLO.fbx  ->  the "HELLO" gloss plays it.
+// Filename = GLOSS in UPPERCASE, language folder = asl | isl, .fbx or .glb.
+// Source: StudioGalt Sign-Language-Mocap-Archive (CC0) — use the "No Mesh Mixamo"
+// FBX (Mixamo rig); it retargets cleanly onto this avatar.
 //
-// ASL clips: StudioGalt Sign-Language-Mocap-Archive (CC0). Use the "No Mesh Mixamo"
-// FBX files (animation on a Mixamo rig) — they retarget cleanly onto this avatar.
-// 1) Download the sign's "No Mesh Mixamo" .fbx
-// 2) Put it in client/public/clips/asl/<sign>.fbx
-// 3) Map the gloss below, e.g.:
-//    ASL: { HELLO: '/clips/asl/hello.fbx', 'THANK-YOU': '/clips/asl/thankyou.fbx' }
+// This map is only for OVERRIDES — when a file is named differently or lives
+// elsewhere, e.g.  ASL: { 'THANK-YOU': '/clips/asl/thank_you_v2.fbx' }
 export const SIGN_CLIPS: Record<SignLang, Record<string, string>> = {
   ASL: {},
   ISL: {},
