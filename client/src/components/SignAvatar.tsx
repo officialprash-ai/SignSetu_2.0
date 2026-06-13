@@ -240,13 +240,18 @@ function GLBAvatar({
   // Auto-fit: normalize the model to a fixed world height and center it,
   // regardless of the GLB's native scale (this avatar is exported huge).
   const fit = useMemo(() => {
+    cloned.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
     box.getSize(size);
     box.getCenter(center);
-    const TARGET_H = 2.2;                       // full-body height in world units
-    const baseScale = TARGET_H / (size.y || 1); // normalize height
+    const TARGET_H = 2.2;                        // full-body height in world units
+    let baseScale = TARGET_H / size.y;
+    if (!isFinite(baseScale) || baseScale <= 0) {
+      baseScale = 1;
+      center.set(0, 0, 0);
+    }
     return { baseScale, center };
   }, [cloned]);
 
