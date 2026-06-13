@@ -3,6 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export interface GlossEntry {
   gloss: string;
@@ -287,6 +288,47 @@ function GLBAvatar({
     }
   }, [cloned]);
 
+  // ── Clip player (hybrid): real animation clips when available, else procedural ──
+  const mixer = useMemo(() => new THREE.AnimationMixer(cloned), [cloned]);
+  const actionsRef       = useRef<Map<string, THREE.AnimationAction>>(new Map());
+  const currentActionRef = useRef<THREE.AnimationAction | null>(null);
+  const clipPlayingRef   = useRef(false);
+
+  useEffect(() => {
+    actionsRef.current.clear();
+    const entries = Object.entries(SIGN_CLIPS);
+    if (entries.length === 0) return; // dormant — pure procedural
+    // Build norm->realBoneName map so Mixamo/other clips retarget onto this rig
+    const nameByNorm = new Map<string, string>();
+    cloned.traverse(o => { if ((o as THREE.Bone).isBone) nameByNorm.set(normBone(o.name), o.name); });
+    const loader = new GLTFLoader();
+    let cancelled = false;
+    entries.forEach(([gloss, url]) => {
+      loader.load(url, gltf => {
+        if (cancelled || !gltf.animations.length) return;
+        const clip = gltf.animations[0];
+        // Retarget track node names to this skeleton's actual bone names
+        clip.tracks.forEach(t => {
+          const dot = t.name.indexOf('.');
+          if (dot < 0) return;
+          const node = t.name.slice(0, dot);
+          const real = nameByNorm.get(normBone(node));
+          if (real) t.name = real + t.name.slice(dot);
+        });
+        const action = mixer.clipAction(clip);
+        action.clampWhenFinished = true;
+        action.setLoop(THREE.LoopOnce, 1);
+        actionsRef.current.set(gloss.toUpperCase(), action);
+      }, undefined, () => {/* ignore clip load error -> procedural fallback */});
+    });
+    return () => { cancelled = true; };
+  }, [cloned, mixer]);
+
+  const stopClip = () => {
+    if (currentActionRef.current) { currentActionRef.current.fadeOut(0.12); currentActionRef.current = null; }
+    clipPlayingRef.current = false;
+  };
+
   const elapsedRef  = useRef(0);
   const prevIdxRef  = useRef(-1);
   const poseRef     = useRef<FullPose>(NEUTRAL);
@@ -296,6 +338,7 @@ function GLBAvatar({
     elapsedRef.current = 0;
     prevIdxRef.current = -1;
     poseRef.current    = NEUTRAL;
+    stopClip();
   }, [glossSequence]);
 
   useFrame((_, delta) => {
@@ -309,6 +352,7 @@ function GLBAvatar({
     if (spine) spine.rotation.x += (breathe - spine.rotation.x) * 0.04;
 
     if (!isPlaying || glossSequence.length === 0) {
+      if (clipPlayingRef.current) stopClip();
       applyPose(NEUTRAL, B, 0.04);
       return;
     }
@@ -323,17 +367,32 @@ function GLBAvatar({
     if (activeIdx !== prevIdxRef.current) {
       prevIdxRef.current = activeIdx;
       if (activeIdx >= 0) {
-        poseRef.current = resolvePose(glossSequence[activeIdx]);
+        const action = actionsRef.current.get(glossSequence[activeIdx].gloss.toUpperCase());
+        if (action) {
+          // real clip available -> play it, skip procedural this gloss
+          currentActionRef.current?.fadeOut(0.12);
+          action.reset().fadeIn(0.12).play();
+          currentActionRef.current = action;
+          clipPlayingRef.current = true;
+        } else {
+          stopClip();
+          poseRef.current = resolvePose(glossSequence[activeIdx]);
+        }
         onGlossChange?.(activeIdx);
       } else if (ms >= (glossSequence[glossSequence.length - 1]?.endMs ?? 0)) {
         elapsedRef.current = 0;
         prevIdxRef.current = -1;
         poseRef.current    = NEUTRAL;
+        stopClip();
         onAnimationComplete?.();
       }
     }
 
-    applyPose(poseRef.current, B, alpha);
+    if (clipPlayingRef.current) {
+      mixer.update(delta * playbackSpeed); // clip drives the bones
+    } else {
+      applyPose(poseRef.current, B, alpha); // procedural fallback
+    }
   });
 
   // scale = user zoom multiplier (~1). Normalize, then re-center the bbox at origin,
@@ -430,8 +489,19 @@ function LoadingFallback() {
 // Standard Ready Player Me avatar (T-pose, standard humanoid bones + correct axes)
 // — compatible with the sign-pose engine. Override with VITE_AVATAR_URL if needed,
 // e.g. your own https://models.readyplayer.me/<id>.glb?pose=T
-const DEFAULT_AVATAR_URL = 'https://models.readyplayer.me/6185a4acfb622cf1cdc49348.glb?pose=T&meshLod=0';
+const DEFAULT_AVATAR_URL = 'https://models.readyplayer.me/6185a4acfb622cf1cdc49348.glb';
 const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
+
+// ─── Sign animation clips (drop-in, optional) ────────────────────────────────
+// Hybrid signing: if a gloss has a real animation clip here, play the clip
+// (accurate motion); otherwise fall back to the procedural pose engine below.
+// Clips must target an RPM/Mixamo-compatible skeleton (same bone names) so they
+// retarget cleanly onto this avatar. Add entries as you acquire clips, e.g.:
+//   HELLO: '/clips/hello.glb',
+// Free source: mixamo.com (download "With Skin" off / animation-only FBX -> GLB).
+export const SIGN_CLIPS: Record<string, string> = {
+  // empty for now — every gloss uses the procedural engine until clips are added
+};
 
 // ─── Error boundary for missing GLB ──────────────────────────────────────────
 class GLBErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
