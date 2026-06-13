@@ -13,10 +13,13 @@ export interface GlossEntry {
   fingerspell?: boolean;
 }
 
+export type SignLang = 'ASL' | 'ISL';
+
 export interface SignAvatarProps {
   glossSequence?: GlossEntry[];
   isPlaying?: boolean;
   playbackSpeed?: number;
+  language?: SignLang;
   onGlossChange?: (index: number) => void;
   onAnimationComplete?: () => void;
 }
@@ -155,13 +158,27 @@ function hashStr(s: string): number {
   return Math.abs(h);
 }
 
-function resolvePose(entry: GlossEntry): FullPose {
+// ISL-specific sign overrides (two-handed / India). When language=ISL these win
+// over the (ASL-leaning) NAMED_POSES table. Add ISL-distinct signs here.
+const ISL_POSES: Record<string, FullPose> = {
+  // Namaste — both palms pressed together at chest (ISL greeting)
+  NAMASTE: { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
+             R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
+  HELLO:   { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
+             R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
+  // THANK-YOU (ISL) — both flat hands forward from chin
+  'THANK-YOU': { L:{upper:[0.5,0,0.2], lower:[-0.9,0,0.15], wrist:[0.2,0,0], hand:FLAT},
+                 R:{upper:[0.5,0,-0.2],lower:[-0.9,0,-0.15],wrist:[0.2,0,0], hand:FLAT} },
+};
+
+function resolvePose(entry: GlossEntry, language: SignLang = 'ASL'): FullPose {
   if (entry.fingerspell && entry.gloss.length===1) return getLetterPose(entry.gloss);
   const g = entry.gloss.toUpperCase();
-  if (NAMED_POSES[g]) return NAMED_POSES[g];
-  for (const key of Object.keys(NAMED_POSES)) {
+  const TABLE = language === 'ISL' ? { ...NAMED_POSES, ...ISL_POSES } : NAMED_POSES;
+  if (TABLE[g]) return TABLE[g];
+  for (const key of Object.keys(TABLE)) {
     if (key.startsWith('_')) continue;
-    if (g.includes(key) || key.includes(g)) return NAMED_POSES[key];
+    if (g.includes(key) || key.includes(g)) return TABLE[key];
   }
   return _POOL[hashStr(g) % _POOL.length];
 }
@@ -252,6 +269,7 @@ function GLBAvatar({
   glossSequence,
   isPlaying,
   playbackSpeed,
+  language = 'ASL',
   onGlossChange,
   onAnimationComplete,
 }: {
@@ -260,6 +278,7 @@ function GLBAvatar({
   glossSequence: GlossEntry[];
   isPlaying: boolean;
   playbackSpeed: number;
+  language?: SignLang;
   onGlossChange?: (i: number) => void;
   onAnimationComplete?: () => void;
 }) {
@@ -316,7 +335,7 @@ function GLBAvatar({
 
   useEffect(() => {
     actionsRef.current.clear();
-    const entries = Object.entries(SIGN_CLIPS);
+    const entries = Object.entries(SIGN_CLIPS[language] ?? {});
     if (entries.length === 0) return; // dormant — pure procedural
     // Build norm->realBoneName map so Mixamo/other clips retarget onto this rig
     const nameByNorm = new Map<string, string>();
@@ -342,7 +361,7 @@ function GLBAvatar({
       }, undefined, () => {/* ignore clip load error -> procedural fallback */});
     });
     return () => { cancelled = true; };
-  }, [cloned, mixer]);
+  }, [cloned, mixer, language]);
 
   const stopClip = () => {
     if (currentActionRef.current) { currentActionRef.current.fadeOut(0.12); currentActionRef.current = null; }
@@ -396,7 +415,7 @@ function GLBAvatar({
           clipPlayingRef.current = true;
         } else {
           stopClip();
-          poseRef.current = resolvePose(glossSequence[activeIdx]);
+          poseRef.current = resolvePose(glossSequence[activeIdx], language);
         }
         onGlossChange?.(activeIdx);
       } else if (ms >= (glossSequence[glossSequence.length - 1]?.endMs ?? 0)) {
@@ -537,8 +556,11 @@ const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
 // retarget cleanly onto this avatar. Add entries as you acquire clips, e.g.:
 //   HELLO: '/clips/hello.glb',
 // Free source: mixamo.com (download "With Skin" off / animation-only FBX -> GLB).
-export const SIGN_CLIPS: Record<string, string> = {
-  // empty for now — every gloss uses the procedural engine until clips are added
+// Per-language clip registry. Accurate motion clips drop in here by gloss; missing
+// glosses fall back to the procedural engine. e.g. ASL: { HELLO: '/clips/asl/hello.glb' }
+export const SIGN_CLIPS: Record<SignLang, Record<string, string>> = {
+  ASL: {},
+  ISL: {},
 };
 
 // ─── Error boundary for missing GLB ──────────────────────────────────────────
@@ -559,6 +581,7 @@ function AvatarScene(props: {
   glossSequence: GlossEntry[];
   isPlaying: boolean;
   playbackSpeed: number;
+  language?: SignLang;
   onGlossChange?: (i: number) => void;
   onAnimationComplete?: () => void;
 }) {
@@ -613,6 +636,7 @@ export function SignAvatar({
   glossSequence = [],
   isPlaying = false,
   playbackSpeed = 1,
+  language = 'ASL',
   onGlossChange,
   onAnimationComplete,
 }: SignAvatarProps) {
@@ -640,6 +664,7 @@ export function SignAvatar({
           glossSequence={glossSequence}
           isPlaying={isPlaying}
           playbackSpeed={playbackSpeed}
+          language={language}
           onGlossChange={onGlossChange}
           onAnimationComplete={onAnimationComplete}
         />

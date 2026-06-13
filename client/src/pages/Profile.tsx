@@ -128,6 +128,7 @@ export default function Profile() {
                   glossSequence={glossSequence}
                   isPlaying={isPlaying}
                   playbackSpeed={1}
+                  language={language}
                   onAnimationComplete={() => setIsPlaying(false)}
                 />
               </div>

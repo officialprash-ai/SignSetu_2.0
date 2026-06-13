@@ -266,6 +266,7 @@ export default function Translator() {
                   glossSequence={glossSequence}
                   isPlaying={isPlaying}
                   playbackSpeed={playbackSpeed}
+                  language={language}
                   onGlossChange={setActiveGlossIdx}
                   onAnimationComplete={handleAnimationComplete}
                 />

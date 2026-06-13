@@ -82,6 +82,7 @@ function SignPreviewDialog({
             glossSequence={glossSequence}
             isPlaying={isPlaying}
             playbackSpeed={0.9}
+            language={(sign.language === 'ISL' ? 'ISL' : 'ASL')}
             onAnimationComplete={() => {
               // auto-loop: restart
               setIsPlaying(false);
