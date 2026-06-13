@@ -427,7 +427,11 @@ function LoadingFallback() {
 
 // ─── Detect if avatar.glb exists by preloading ───────────────────────────────
 // We always try to load; if it fails we catch it with an error boundary.
-const AVATAR_URL = '/ready_player_me_male_avatar__vrchatgame.glb';
+// Standard Ready Player Me avatar (T-pose, standard humanoid bones + correct axes)
+// — compatible with the sign-pose engine. Override with VITE_AVATAR_URL if needed,
+// e.g. your own https://models.readyplayer.me/<id>.glb?pose=T
+const DEFAULT_AVATAR_URL = 'https://models.readyplayer.me/6185a4acfb622cf1cdc49348.glb?pose=T&meshLod=0';
+const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
 
 // ─── Error boundary for missing GLB ──────────────────────────────────────────
 class GLBErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
