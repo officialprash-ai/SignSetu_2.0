@@ -12,4 +12,35 @@ interface SplineSceneProps {
 }
 
 export function SplineScene({ scene, className }: SplineSceneProps) {
-  const [ready, setReady] = useState(fal
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (customElements.get('spline-viewer')) { setReady(true); return; }
+    if (!document.querySelector('script[data-spline-viewer]')) {
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = VIEWER_SRC;
+      s.dataset.splineViewer = '1';
+      document.head.appendChild(s);
+    }
+    let alive = true;
+    customElements.whenDefined('spline-viewer').then(() => { if (alive) setReady(true); });
+    return () => { alive = false; };
+  }, []);
+
+  return (
+    <div className={className} style={{ position: 'relative' }}>
+      {!ready && (
+        <div className="w-full h-full flex items-center justify-center">
+          <span className="loader" />
+        </div>
+      )}
+      {ready &&
+        React.createElement('spline-viewer', {
+          url: scene,
+          style: { width: '100%', height: '100%', display: 'block' },
+        })}
+    </div>
+  );
+}

@@ -221,11 +221,17 @@ function findBone(map: Map<string, THREE.Bone>, key: string): THREE.Bone | null 
   return null;
 }
 
+function boneRest(bone: THREE.Bone): THREE.Euler {
+  return (bone as THREE.Bone & { __rest?: THREE.Euler }).__rest ?? bone.rotation;
+}
+
+// Apply target as an OFFSET from the bone's rest rotation (rig-agnostic)
 function lerpBone(bone: THREE.Bone | null, tx: number, ty: number, tz: number, a: number) {
   if (!bone) return;
-  bone.rotation.x += (tx - bone.rotation.x) * a;
-  bone.rotation.y += (ty - bone.rotation.y) * a;
-  bone.rotation.z += (tz - bone.rotation.z) * a;
+  const r = boneRest(bone);
+  bone.rotation.x += (r.x + tx - bone.rotation.x) * a;
+  bone.rotation.y += (r.y + ty - bone.rotation.y) * a;
+  bone.rotation.z += (r.z + tz - bone.rotation.z) * a;
 }
 
 // ─── GLB avatar scene ─────────────────────────────────────────────────────────
@@ -274,6 +280,9 @@ function GLBAvatar({
     const add = (b: THREE.Bone) => {
       map.set(b.name, b);
       map.set(normBone(b.name), b); // normalized key for fuzzy match
+      // Remember rest rotation so poses can be applied as offsets (rig-agnostic)
+      const anyB = b as THREE.Bone & { __rest?: THREE.Euler };
+      if (!anyB.__rest) anyB.__rest = b.rotation.clone();
     };
     // Authoritative: bones actually used for skinning
     cloned.traverse(obj => {
@@ -349,7 +358,7 @@ function GLBAvatar({
     // Subtle breathing on spine
     const breathe = Math.sin(idleRef.current * 1.1) * 0.008;
     const spine = findBone(B, 'Spine');
-    if (spine) spine.rotation.x += (breathe - spine.rotation.x) * 0.04;
+    if (spine) spine.rotation.x += (boneRest(spine).x + breathe - spine.rotation.x) * 0.04;
 
     if (!isPlaying || glossSequence.length === 0) {
       if (clipPlayingRef.current) stopClip();
@@ -443,7 +452,8 @@ function applyPose(pose: FullPose, B: Map<string, THREE.Bone>, a: number) {
 
 function lerpBoneX(bone: THREE.Bone | null, target: number, a: number) {
   if (!bone) return;
-  bone.rotation.x += (target - bone.rotation.x) * a;
+  const rx = boneRest(bone).x;
+  bone.rotation.x += (rx + target - bone.rotation.x) * a;
 }
 
 // ─── Fallback placeholder (shown while GLB not yet placed) ───────────────────
@@ -486,10 +496,10 @@ function LoadingFallback() {
 
 // ─── Detect if avatar.glb exists by preloading ───────────────────────────────
 // We always try to load; if it fails we catch it with an error boundary.
-// Standard Ready Player Me avatar (T-pose, standard humanoid bones + correct axes)
-// — compatible with the sign-pose engine. Override with VITE_AVATAR_URL if needed,
-// e.g. your own https://models.readyplayer.me/<id>.glb?pose=T
-const DEFAULT_AVATAR_URL = 'https://models.readyplayer.me/6185a4acfb622cf1cdc49348.glb';
+// Local human avatar (bundled, reliable, full finger bones). Poses are applied as
+// OFFSETS from each bone's rest rotation (see applyPose), so this works regardless
+// of the rig's bind pose. Override with VITE_AVATAR_URL to use a different model.
+const DEFAULT_AVATAR_URL = '/ready_player_me_male_avatar__vrchatgame.glb';
 const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
 
 // ─── Sign animation clips (drop-in, optional) ────────────────────────────────
@@ -544,3 +554,116 @@ function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
         borderRadius: '50%',
         border: '1.5px solid rgba(255,255,255,0.25)',
         background: 'rgba(15,23,42,0.55)',
+        backdropFilter: 'blur(6px)',
+        color: '#fff',
+        fontSize: 20,
+        lineHeight: 1,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 400,
+        userSelect: 'none',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.7)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'rgba(15,23,42,0.55)')}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Public component ─────────────────────────────────────────────────────────
+// scale is now a zoom multiplier applied on top of auto-fit normalization
+const MIN_SCALE = 0.6;
+const MAX_SCALE = 1.8;
+const STEP      = 0.1;
+const BASE_SCALE = 1.0;
+
+export function SignAvatar({
+  glossSequence = [],
+  isPlaying = false,
+  playbackSpeed = 1,
+  onGlossChange,
+  onAnimationComplete,
+}: SignAvatarProps) {
+  const [avatarScale, setAvatarScale] = useState(BASE_SCALE);
+
+  const zoomIn  = () => setAvatarScale(s => Math.min(+(s + STEP).toFixed(3), MAX_SCALE));
+  const zoomOut = () => setAvatarScale(s => Math.max(+(s - STEP).toFixed(3), MIN_SCALE));
+  const reset   = () => setAvatarScale(BASE_SCALE);
+
+  const pct = Math.round(((avatarScale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)) * 100);
+
+  return (
+    <div
+      className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden"
+      style={{ position: 'relative' }}
+    >
+      <Canvas camera={{ position: [0, 0.1, 4.8], fov: 30 }} gl={{ antialias: true }}>
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
+        <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
+        <directionalLight position={[0, -1, 3]} intensity={0.15} color="#b0c8ff" />
+        <Environment preset="studio" />
+        <AvatarScene
+          scale={avatarScale}
+          glossSequence={glossSequence}
+          isPlaying={isPlaying}
+          playbackSpeed={playbackSpeed}
+          onGlossChange={onGlossChange}
+          onAnimationComplete={onAnimationComplete}
+        />
+        <OrbitControls
+          target={[0, 0.1, 0]}
+          enableZoom={false}
+          enablePan={false}
+          minPolarAngle={Math.PI / 4}
+          maxPolarAngle={Math.PI / 1.8}
+          minAzimuthAngle={-Math.PI / 4}
+          maxAzimuthAngle={Math.PI / 4}
+        />
+      </Canvas>
+
+      {/* Zoom controls overlay */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 14,
+          right: 14,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+          zIndex: 10,
+        }}
+      >
+        <ZoomBtn label="+" onClick={zoomIn} />
+        {/* percentage pill */}
+        <button
+          onClick={reset}
+          title="Reset zoom"
+          style={{
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.8)',
+            background: 'rgba(15,23,42,0.45)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 12,
+            padding: '2px 8px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+            userSelect: 'none',
+          }}
+        >
+          {pct}%
+        </button>
+        <ZoomBtn label="−" onClick={zoomOut} />
+      </div>
+    </div>
+  );
+}
+
+// Preload hint so Three.js starts fetching early
+useGLTF.preload(AVATAR_URL);
+
