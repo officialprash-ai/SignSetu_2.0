@@ -203,9 +203,16 @@ const BONE_ALIASES: Record<string, string[]> = {
   Head:  ['Head','mixamorigHead'],
 };
 
+function normBone(n: string): string {
+  return n.toLowerCase().replace(/mixamorig:?/g, '').replace(/[^a-z0-9]/g, '');
+}
+
 function findBone(map: Map<string, THREE.Bone>, key: string): THREE.Bone | null {
   const aliases = BONE_ALIASES[key] ?? [key];
-  for (const a of aliases) { const b = map.get(a); if (b) return b; }
+  for (const a of aliases) {
+    const b = map.get(a) ?? map.get(normBone(a));
+    if (b) return b;
+  }
   return null;
 }
 
@@ -259,9 +266,18 @@ function GLBAvatar({
 
   useEffect(() => {
     const map = new Map<string, THREE.Bone>();
-    cloned.traverse(obj => { if ((obj as THREE.Bone).isBone) map.set(obj.name, obj as THREE.Bone); });
+    const add = (b: THREE.Bone) => {
+      map.set(b.name, b);
+      map.set(normBone(b.name), b); // normalized key for fuzzy match
+    };
+    // Authoritative: bones actually used for skinning
+    cloned.traverse(obj => {
+      const sm = obj as THREE.SkinnedMesh;
+      if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.bones.forEach(add);
+    });
+    // Fallback: anything flagged as a Bone
+    cloned.traverse(obj => { if ((obj as THREE.Bone).isBone) add(obj as THREE.Bone); });
     bonesRef.current = map;
-    // Log found bones in dev so users can verify naming
     if (process.env.NODE_ENV !== 'production') {
       console.log('[SignAvatar] bones found:', [...map.keys()].join(', '));
     }
