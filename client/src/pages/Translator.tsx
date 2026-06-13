@@ -76,6 +76,8 @@ export default function Translator() {
   const [activeGlossIdx, setActiveGlossIdx] = useState(-1);
   const [replayKey, setReplayKey]           = useState(0);
   const [fileName, setFileName]             = useState('');
+  const [videoUrl, setVideoUrl]             = useState<string | null>(null);
+  const videoRef                            = useRef<HTMLVideoElement | null>(null);
   const [showTip, setShowTip]               = useState(() => {
     try { return !localStorage.getItem(TIP_KEY); } catch { return true; }
   });
@@ -126,6 +128,9 @@ export default function Translator() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Revoke object URL on unmount
+  useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
+
   // Avatar greets on first load (Namaste for ISL, Hello for ASL)
   useEffect(() => {
     if (greetedRef.current) return;
@@ -166,6 +171,24 @@ export default function Translator() {
     } catch { toast.error('YouTube transcription failed'); }
   };
 
+  // Scale avatar playback so it finishes when the video does, then (re)start it
+  const startAvatarWithVideo = () => {
+    const v = videoRef.current;
+    const lastMs = glossSequence[glossSequence.length - 1]?.endMs ?? 0;
+    if (v && v.duration > 0 && lastMs > 0) {
+      setPlaybackSpeed(+((lastMs / 1000) / v.duration).toFixed(3));
+    }
+    setActiveGlossIdx(-1);
+    setIsPlaying(false);
+    setTimeout(() => { setReplayKey(k => k + 1); setIsPlaying(true); }, 30);
+  };
+  const handleVideoPlay  = () => startAvatarWithVideo();
+  const handleVideoPause = () => setIsPlaying(false);
+  const handleVideoSeeked = () => {
+    const v = videoRef.current;
+    if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
+  };
+
   const handleReplay = () => {
     setActiveGlossIdx(-1);
     setIsPlaying(false);
@@ -188,6 +211,8 @@ export default function Translator() {
       toast.error('File too large — max 25 MB'); return;
     }
     setFileName(file.name);
+    // Keep playable video for synced playback
+    setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return file.type.startsWith('video/') ? URL.createObjectURL(file) : null; });
     try {
       toast.info('Extracting audio & transcribing — this may take a moment…');
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -402,8 +427,40 @@ export default function Translator() {
           </Card>
         </div>
 
-        {/* ── Right: Avatar Panel ── */}
+        {/* ── Right: Video + Avatar Panel ── */}
         <div className="space-y-4">
+          {videoUrl && (
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sm">Uploaded Video</h3>
+                <span className="text-xs text-muted-foreground">Plays in sync with the avatar</span>
+              </div>
+              <div className="relative rounded-lg overflow-hidden bg-black">
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  className="w-full max-h-72 object-contain bg-black"
+                  onPlay={handleVideoPlay}
+                  onPause={handleVideoPause}
+                  onSeeked={handleVideoSeeked}
+                />
+                {/* live sign subtitle */}
+                {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+                  <div className="absolute bottom-12 left-0 right-0 flex justify-center pointer-events-none">
+                    <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                      {glossSequence[activeGlossIdx].gloss}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Press play on the video — the avatar signs along with it.
+              </p>
+            </Card>
+          )}
+
           <Card className="p-5 space-y-4">
             <div className="h-72 sm:h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
               {glossSequence.length > 0 || isPending ? (

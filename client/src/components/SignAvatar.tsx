@@ -204,7 +204,11 @@ const BONE_ALIASES: Record<string, string[]> = {
 };
 
 function normBone(n: string): string {
-  return n.toLowerCase().replace(/mixamorig:?/g, '').replace(/[^a-z0-9]/g, '');
+  return n
+    .replace(/_\d+$/, '')              // drop exporter suffix e.g. LeftArm_011 -> LeftArm
+    .toLowerCase()
+    .replace(/mixamorig:?/g, '')
+    .replace(/[^a-z0-9]/g, '');
 }
 
 function findBone(map: Map<string, THREE.Bone>, key: string): THREE.Bone | null {
