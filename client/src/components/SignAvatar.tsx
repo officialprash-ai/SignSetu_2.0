@@ -1,10 +1,18 @@
-import { Suspense, useEffect, useMemo, useRef, useState, Component, type ReactNode } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, OrbitControls, useGLTF } from '@react-three/drei';
-import * as THREE from 'three';
-import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+// ─── SignAvatar — 2D procedural canvas presenter ─────────────────────────────
+// Lightweight HTML5-canvas sign avatar (ported from the SignSetu studio bridge).
+// Replaces the previous Three.js/GLB rig: no 3D engine, no model downloads, just
+// keyframe poses interpolated with cosine easing at 60fps. Public API unchanged
+// so existing consumers (Translator, Dictionary, Profile) need no edits.
+
+import { useEffect, useRef } from 'react';
+import {
+  type Pose,
+  type Joint,
+  type FingerState,
+  REST_POSE,
+  interpolatePose,
+  resolveKeyframes,
+} from '@/lib/poses2d';
 
 export interface GlossEntry {
   gloss: string;
@@ -25,702 +33,16 @@ export interface SignAvatarProps {
   onAnimationComplete?: () => void;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-type JA = [number, number, number];
+// Canvas authoring resolution (poses are defined in this coordinate space).
+const CANVAS_W = 600;
+const CANVAS_H = 730;
+const AVATAR_Y_SHIFT = -110;
 
-interface HandShape {
-  fingers: [number, number, number, number]; // index, middle, ring, pinky  0=open 1=closed
-  thumb: number;                             // 0=open 1=closed
-  wristY?: number;
-}
-
-interface ArmPose {
-  upper: JA;   // upper arm rotation x,y,z
-  lower: JA;   // forearm rotation
-  wrist: JA;   // wrist rotation
-  hand: HandShape;
-}
-
-interface FullPose { L: ArmPose; R: ArmPose; }
-
-// ─── Preset hand shapes ───────────────────────────────────────────────────────
-const OPEN:  HandShape = { fingers:[0,   0,   0,   0  ], thumb:0.5 };
-const FIST:  HandShape = { fingers:[1,   1,   1,   1  ], thumb:0.3 };
-const INDEX: HandShape = { fingers:[1,   1,   1,   0  ], thumb:1   };
-const TWO:   HandShape = { fingers:[1,   1,   0,   0  ], thumb:1   };
-const CLAW:  HandShape = { fingers:[0.5, 0.5, 0.5, 0.5], thumb:0.3 };
-const PINCH: HandShape = { fingers:[0.5, 0.5, 0.5, 0.5], thumb:0.2 };
-const FLAT:  HandShape = { fingers:[0,   0,   0,   0  ], thumb:0.8 };
-
-const NEUTRAL: FullPose = {
-  L: { upper:[0.05,0, 0.45], lower:[0,0,0], wrist:[0,0,0], hand:OPEN },
-  R: { upper:[0.05,0,-0.45], lower:[0,0,0], wrist:[0,0,0], hand:OPEN },
-};
-
-// ─── Named sign poses ─────────────────────────────────────────────────────────
-const NAMED_POSES: Record<string, FullPose> = {
-  HELLO:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
-  HI:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.3,0.1,-0.3],lower:[-0.5,0,0.3],wrist:[0.3,0.1,0],hand:FLAT} },
-  // Namaste — both palms pressed together at chest
-  NAMASTE:     { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
-                 R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
-  BYE:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.1,0,-0.4],lower:[-0.3,0,0.2], wrist:[0.4,0.2,0],hand:OPEN} },
-  GOODBYE:     { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.1,0,-0.4],lower:[-0.3,0,0.2], wrist:[0.4,0.2,0],hand:OPEN} },
-  'THANK-YOU': { L:{upper:[0.4,0,0.3], lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN},
-                 R:{upper:[0.4,0,-0.3],lower:[-0.8,0,-0.2], wrist:[0,-0.3,0], hand:OPEN} },
-  THANK:       { L:{upper:[0.4,0,0.3], lower:[-0.8,0,0.2], wrist:[0,0.3,0],  hand:OPEN},
-                 R:{upper:[0.4,0,-0.3],lower:[-0.8,0,-0.2], wrist:[0,-0.3,0], hand:OPEN} },
-  PLEASE:      { L:{upper:[0.05,0,0.5],lower:[0.2,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.6,-0.1,-0.4],lower:[-0.5,0,0], wrist:[0.2,0,0],  hand:FLAT} },
-  SORRY:       { L:{upper:[0.6,0,0.2], lower:[-0.7,0,0.1], wrist:[0.1,0,0],  hand:FIST},
-                 R:{upper:[0.6,0,-0.2],lower:[-0.7,0,-0.1], wrist:[0.1,0,0],  hand:FIST} },
-  WELCOME:     { L:{upper:[0.05,0,0.5],lower:[0,0,0],       wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.2,0,-0.6],lower:[-0.4,0,0.2],  wrist:[0,0,0],    hand:OPEN} },
-  YES:         { L:{upper:[-1.5,0,0.2],lower:[-0.4,0,0],    wrist:[0.2,0,0],  hand:OPEN},
-                 R:{upper:[-1.3,0,-0.3],lower:[-0.5,0,0],   wrist:[0.3,0,0],  hand:FIST} },
-  NO:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.1,0,-0.5],lower:[-0.3,0,0.2],  wrist:[0,0,0],    hand:TWO } },
-  I:           { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.5,0,-0.3], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST} },
-  ME:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.5,0,-0.3], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:FIST} },
-  YOU:         { L:{upper:[0.05,0,0.45],lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0,0.5,-0.5], lower:[0,0,-0.3],   wrist:[0,0,0],    hand:INDEX} },
-  LOVE:        { L:{upper:[0.6,0,0.3], lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:FIST},
-                 R:{upper:[0.6,0,-0.3],lower:[-0.6,0,-0.1], wrist:[0.1,0,0],  hand:FIST} },
-  GOOD:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.4,0,-0.3],lower:[-0.7,0,0.1],  wrist:[0,0,0],    hand:FLAT} },
-  BAD:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.4,0,-0.3],lower:[-0.7,0,0.1],  wrist:[0.3,0,0],  hand:FLAT} },
-  HAPPY:       { L:{upper:[0.4,0,0.3], lower:[-0.6,0,0.1], wrist:[0.1,0,0],  hand:OPEN},
-                 R:{upper:[0.4,0,-0.3],lower:[-0.6,0,-0.1], wrist:[0.1,0,0],  hand:OPEN} },
-  HELP:        { L:{upper:[0.3,0,0.4], lower:[-0.5,0,0.2], wrist:[0,0,0],    hand:FIST},
-                 R:{upper:[0.3,0,-0.5],lower:[-0.3,0,0],    wrist:[0,0,0],    hand:FLAT} },
-  KNOW:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-0.9,0.2,-0.4],lower:[-0.5,0.1,0.2],wrist:[0.1,0,0],hand:FLAT} },
-  GO:          { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0,0.2,-0.6], lower:[-0.3,0,0.2], wrist:[0,0,0],    hand:INDEX} },
-  STOP:        { L:{upper:[0.2,0,0.5], lower:[-0.4,0,0.2], wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.2,0,-0.5],lower:[-0.6,0,0],    wrist:[0.3,0,0],  hand:FLAT} },
-  WHAT:        { L:{upper:[-0.8,0,0.3],lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN},
-                 R:{upper:[-0.8,0,-0.3],lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN} },
-  WHERE:       { L:{upper:[-0.8,0,0.3],lower:[-0.5,0,0.2], wrist:[0.5,0,0],  hand:OPEN},
-                 R:{upper:[-0.8,0,-0.3],lower:[-0.5,0,-0.2],wrist:[0.5,0,0],  hand:OPEN} },
-  HOW:         { L:{upper:[-0.6,0,0.3],lower:[-0.4,0,0.2], wrist:[0.3,0,0],  hand:FIST},
-                 R:{upper:[-0.6,0,-0.3],lower:[-0.4,0,-0.2],wrist:[0.3,0,0],  hand:FIST} },
-  WHO:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-0.8,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX} },
-  WORK:        { L:{upper:[0.2,0,0.4], lower:[-0.5,0,0.2], wrist:[0.2,0,0],  hand:FIST},
-                 R:{upper:[0.2,0,-0.4],lower:[-0.5,0,-0.2], wrist:[0.2,0,0],  hand:FIST} },
-  UNDERSTAND:  { L:{upper:[0.05,0,0.45],lower:[0,0,0],      wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.1,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX} },
-  NAME:        { L:{upper:[0.05,0,0.45],lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-1.0,0.2,-0.3],lower:[-0.6,0.1,0.2],wrist:[0.2,-0.2,0],hand:TWO} },
-  // ── Expanded vocabulary (reduces random fallback poses) ──────────────────────
-  FINE:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.5,0,-0.25],lower:[-0.6,0,0.1],wrist:[0,0,0],    hand:FLAT} },
-  NICE:        { L:{upper:[0.3,0,0.4], lower:[-0.5,0,0.2], wrist:[0,0.2,0],  hand:FLAT},
-                 R:{upper:[0.3,0,-0.4],lower:[-0.5,0,-0.2],wrist:[0,-0.2,0], hand:FLAT} },
-  MEET:        { L:{upper:[0.2,0,0.5], lower:[-0.6,0,0.1], wrist:[0,0,0],    hand:INDEX},
-                 R:{upper:[0.2,0,-0.5],lower:[-0.6,0,-0.1],wrist:[0,0,0],    hand:INDEX} },
-  WANT:        { L:{upper:[0.4,0,0.45],lower:[-0.6,0,0.2], wrist:[0.3,0,0],  hand:CLAW},
-                 R:{upper:[0.4,0,-0.45],lower:[-0.6,0,-0.2],wrist:[0.3,0,0], hand:CLAW} },
-  NEED:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.3,0,-0.5],lower:[-0.7,0,0],   wrist:[0.4,0,0],  hand:INDEX} },
-  COME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[-0.6,0.2,-0.4],lower:[-0.7,0,0.3],wrist:[0.2,0,0],hand:INDEX} },
-  EAT:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.7,-0.1,-0.3],lower:[-1.2,0,0],wrist:[0.2,0,0],  hand:PINCH} },
-  DRINK:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.6,-0.1,-0.3],lower:[-1.3,0,0],wrist:[0.3,0,0],  hand:CLAW} },
-  WATER:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.4,0,-0.4],lower:[-1.0,0,0],   wrist:[0.2,0,0],  hand:TWO } },
-  MORE:        { L:{upper:[0.4,0,0.4], lower:[-0.7,0,0.2], wrist:[0,0,0],    hand:PINCH},
-                 R:{upper:[0.4,0,-0.4],lower:[-0.7,0,-0.2],wrist:[0,0,0],    hand:PINCH} },
-  FAMILY:      { L:{upper:[0.35,0,0.4],lower:[-0.6,0,0.2], wrist:[0.1,0,0],  hand:OPEN},
-                 R:{upper:[0.35,0,-0.4],lower:[-0.6,0,-0.2],wrist:[0.1,0,0], hand:OPEN} },
-  FRIEND:      { L:{upper:[0.3,0,0.45],lower:[-0.8,0,0.2], wrist:[0,0,0],    hand:INDEX},
-                 R:{upper:[0.3,0,-0.45],lower:[-0.8,0,-0.2],wrist:[0,0,0],   hand:INDEX} },
-  HOME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.5,-0.1,-0.3],lower:[-1.0,0,0],wrist:[0.2,0,0],  hand:PINCH} },
-  SCHOOL:      { L:{upper:[0.3,0,0.5], lower:[-0.6,0,0.2], wrist:[0,0,0],    hand:FLAT},
-                 R:{upper:[0.4,0,-0.4],lower:[-0.7,0,0],   wrist:[0.3,0,0],  hand:FLAT} },
-  TODAY:       { L:{upper:[0.5,0,0.4], lower:[-0.7,0,0.2], wrist:[0.2,0,0],  hand:FLAT},
-                 R:{upper:[0.5,0,-0.4],lower:[-0.7,0,-0.2],wrist:[0.2,0,0],  hand:FLAT} },
-  TIME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.3,0,-0.4],lower:[-0.9,0,0.2], wrist:[0,0,0],    hand:INDEX} },
-  SEE:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.3,0.1,-0.4],lower:[-0.9,0,0.2],wrist:[0,0,0],   hand:TWO } },
-  LIKE:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
-                 R:{upper:[0.5,0,-0.3],lower:[-0.6,0,0.1], wrist:[0,0,0],    hand:PINCH} },
-  // fallback pool
-  _p0: {L:{upper:[-0.2,0,1.3],lower:[-0.3,0,0.2],wrist:[0,0,0],hand:OPEN},R:{upper:[-0.2,0,-1.3],lower:[-0.3,0,-0.2],wrist:[0,0,0],hand:OPEN}},
-  _p1: {L:{upper:[-0.5,0,0.5],lower:[-0.4,0,0.2],wrist:[0.2,0,0],hand:FIST},R:{upper:[-0.5,0,-0.5],lower:[-0.4,0,-0.2],wrist:[0.2,0,0],hand:FIST}},
-  _p2: {L:{upper:[0.3,0,0.6],lower:[-0.5,0,0.3],wrist:[0,0.2,0],hand:OPEN},R:{upper:[0.3,0,-0.6],lower:[-0.5,0,-0.3],wrist:[0,-0.2,0],hand:OPEN}},
-  _p3: {L:{upper:[-0.8,0,0.4],lower:[-0.3,0,0.2],wrist:[0.1,0,0],hand:CLAW},R:{upper:[-0.8,0,-0.4],lower:[-0.3,0,-0.2],wrist:[0.1,0,0],hand:CLAW}},
-};
-
-const _POOL = Object.keys(NAMED_POSES).filter(k=>k.startsWith('_p')).map(k=>NAMED_POSES[k]);
-
-// ─── Fingerspelling ───────────────────────────────────────────────────────────
-const FS_ARM: Pick<ArmPose,'upper'|'lower'|'wrist'> = { upper:[0.25,0,-0.55], lower:[-0.75,0,0], wrist:[0,0,0] };
-
-const LETTER_SHAPES: Record<string, HandShape> = {
-  A:{fingers:[1,1,1,1],thumb:0.3}, B:{fingers:[0,0,0,0],thumb:1},
-  C:{fingers:[0.4,0.4,0.4,0.4],thumb:0.4}, D:{fingers:[1,1,1,0],thumb:0.5},
-  E:{fingers:[0.8,0.8,0.8,0.8],thumb:1}, F:{fingers:[0,0,0,1],thumb:0,wristY:0.2},
-  G:{fingers:[1,1,1,0],thumb:0,wristY:-0.6}, H:{fingers:[1,1,0,0],thumb:1,wristY:-0.6},
-  I:{fingers:[0,1,1,1],thumb:1}, J:{fingers:[0,1,1,1],thumb:1},
-  K:{fingers:[1,1,0,0],thumb:0.5}, L:{fingers:[1,1,1,0],thumb:0},
-  M:{fingers:[0.5,0.5,0.5,0.5],thumb:1}, N:{fingers:[1,0.5,0.5,0.5],thumb:1},
-  O:{fingers:[0.5,0.5,0.5,0.5],thumb:0.3}, P:{fingers:[1,1,0,0],thumb:0.5,wristY:-0.3},
-  Q:{fingers:[1,1,1,0],thumb:0,wristY:-0.4}, R:{fingers:[1,1,0,0],thumb:1},
-  S:{fingers:[1,1,1,1],thumb:0}, T:{fingers:[1,1,1,1],thumb:0.5},
-  U:{fingers:[1,1,0,0],thumb:1}, V:{fingers:[1,1,0,0],thumb:1,wristY:0.3},
-  W:{fingers:[1,0,0,0],thumb:1}, X:{fingers:[1,1,1,0.6],thumb:1},
-  Y:{fingers:[0,1,1,1],thumb:0}, Z:{fingers:[1,1,1,0],thumb:1},
-};
-
-function getLetterPose(char: string): FullPose {
-  const shape = LETTER_SHAPES[char.toUpperCase()] ?? LETTER_SHAPES.A;
-  return { L:{...NEUTRAL.L}, R:{...FS_ARM, wrist:[0,shape.wristY??0,0], hand:shape} };
-}
-
-function hashStr(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31,h) + s.charCodeAt(i))|0;
-  return Math.abs(h);
-}
-
-// ISL-specific sign overrides (two-handed / India). When language=ISL these win
-// over the (ASL-leaning) NAMED_POSES table. Add ISL-distinct signs here.
-const ISL_POSES: Record<string, FullPose> = {
-  // Namaste — both palms pressed together at chest (ISL greeting)
-  NAMASTE: { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
-             R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
-  HELLO:   { L:{upper:[0.5,0,0.18], lower:[-1.05,0,0.12], wrist:[0,0,0.1],  hand:FLAT},
-             R:{upper:[0.5,0,-0.18],lower:[-1.05,0,-0.12],wrist:[0,0,-0.1], hand:FLAT} },
-  // THANK-YOU (ISL) — both flat hands forward from chin
-  'THANK-YOU': { L:{upper:[0.5,0,0.2], lower:[-0.9,0,0.15], wrist:[0.2,0,0], hand:FLAT},
-                 R:{upper:[0.5,0,-0.2],lower:[-0.9,0,-0.15],wrist:[0.2,0,0], hand:FLAT} },
-};
-
-function resolvePose(entry: GlossEntry, language: SignLang = 'ASL'): FullPose {
-  if (entry.fingerspell && entry.gloss.length===1) return getLetterPose(entry.gloss);
-  const g = entry.gloss.toUpperCase();
-  const TABLE = language === 'ISL' ? { ...NAMED_POSES, ...ISL_POSES } : NAMED_POSES;
-  if (TABLE[g]) return TABLE[g];
-  for (const key of Object.keys(TABLE)) {
-    if (key.startsWith('_')) continue;
-    if (g.includes(key) || key.includes(g)) return TABLE[key];
-  }
-  return _POOL[hashStr(g) % _POOL.length];
-}
-
-// ─── Bone name maps (Ready Player Me + Mixamo both supported) ─────────────────
-// Keys we look up on the skeleton; first match wins.
-const BONE_ALIASES: Record<string, string[]> = {
-  LeftArm:      ['LeftArm','Left_Arm','mixamorigLeftArm'],
-  RightArm:     ['RightArm','Right_Arm','mixamorigRightArm'],
-  LeftForeArm:  ['LeftForeArm','Left_ForeArm','mixamorigLeftForeArm'],
-  RightForeArm: ['RightForeArm','Right_ForeArm','mixamorigRightForeArm'],
-  LeftHand:     ['LeftHand','Left_Hand','mixamorigLeftHand'],
-  RightHand:    ['RightHand','Right_Hand','mixamorigRightHand'],
-
-  // Fingers (index, middle, ring, pinky) – proximal & mid phalanges
-  LI1:  ['LeftHandIndex1','mixamorigLeftHandIndex1'],
-  LI2:  ['LeftHandIndex2','mixamorigLeftHandIndex2'],
-  LI3:  ['LeftHandIndex3','mixamorigLeftHandIndex3'],
-  LM1:  ['LeftHandMiddle1','mixamorigLeftHandMiddle1'],
-  LM2:  ['LeftHandMiddle2','mixamorigLeftHandMiddle2'],
-  LM3:  ['LeftHandMiddle3','mixamorigLeftHandMiddle3'],
-  LR1:  ['LeftHandRing1','mixamorigLeftHandRing1'],
-  LR2:  ['LeftHandRing2','mixamorigLeftHandRing2'],
-  LR3:  ['LeftHandRing3','mixamorigLeftHandRing3'],
-  LP1:  ['LeftHandPinky1','mixamorigLeftHandPinky1'],
-  LP2:  ['LeftHandPinky2','mixamorigLeftHandPinky2'],
-  LP3:  ['LeftHandPinky3','mixamorigLeftHandPinky3'],
-
-  RI1:  ['RightHandIndex1','mixamorigRightHandIndex1'],
-  RI2:  ['RightHandIndex2','mixamorigRightHandIndex2'],
-  RI3:  ['RightHandIndex3','mixamorigRightHandIndex3'],
-  RM1:  ['RightHandMiddle1','mixamorigRightHandMiddle1'],
-  RM2:  ['RightHandMiddle2','mixamorigRightHandMiddle2'],
-  RM3:  ['RightHandMiddle3','mixamorigRightHandMiddle3'],
-  RR1:  ['RightHandRing1','mixamorigRightHandRing1'],
-  RR2:  ['RightHandRing2','mixamorigRightHandRing2'],
-  RR3:  ['RightHandRing3','mixamorigRightHandRing3'],
-  RP1:  ['RightHandPinky1','mixamorigRightHandPinky1'],
-  RP2:  ['RightHandPinky2','mixamorigRightHandPinky2'],
-  RP3:  ['RightHandPinky3','mixamorigRightHandPinky3'],
-
-  LT1:  ['LeftHandThumb1','mixamorigLeftHandThumb1'],
-  LT2:  ['LeftHandThumb2','mixamorigLeftHandThumb2'],
-  LT3:  ['LeftHandThumb3','mixamorigLeftHandThumb3'],
-  RT1:  ['RightHandThumb1','mixamorigRightHandThumb1'],
-  RT2:  ['RightHandThumb2','mixamorigRightHandThumb2'],
-  RT3:  ['RightHandThumb3','mixamorigRightHandThumb3'],
-
-  Spine: ['Spine','Spine1','mixamorigSpine'],
-  Neck:  ['Neck','mixamorigNeck'],
-  Head:  ['Head','mixamorigHead'],
-};
-
-function normBone(n: string): string {
-  return n
-    .replace(/_\d+$/, '')              // drop exporter suffix e.g. LeftArm_011 -> LeftArm
-    .toLowerCase()
-    .replace(/mixamorig:?/g, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function findBone(map: Map<string, THREE.Bone>, key: string): THREE.Bone | null {
-  const aliases = BONE_ALIASES[key] ?? [key];
-  for (const a of aliases) {
-    const b = map.get(a) ?? map.get(normBone(a));
-    if (b) return b;
-  }
-  return null;
-}
-
-function boneRest(bone: THREE.Bone): THREE.Euler {
-  return (bone as THREE.Bone & { __rest?: THREE.Euler }).__rest ?? bone.rotation;
-}
-
-// Apply target as an OFFSET from the bone's rest rotation (rig-agnostic)
-function lerpBone(bone: THREE.Bone | null, tx: number, ty: number, tz: number, a: number) {
-  if (!bone) return;
-  const r = boneRest(bone);
-  bone.rotation.x += (r.x + tx - bone.rotation.x) * a;
-  bone.rotation.y += (r.y + ty - bone.rotation.y) * a;
-  bone.rotation.z += (r.z + tz - bone.rotation.z) * a;
-}
-
-// ─── GLB avatar scene ─────────────────────────────────────────────────────────
-function GLBAvatar({
-  url,
-  scale,
-  glossSequence,
-  isPlaying,
-  playbackSpeed,
-  language = 'ASL',
-  onGlossChange,
-  onAnimationComplete,
-}: {
-  url: string;
-  scale: number;
-  glossSequence: GlossEntry[];
-  isPlaying: boolean;
-  playbackSpeed: number;
-  language?: SignLang;
-  onGlossChange?: (i: number) => void;
-  onAnimationComplete?: () => void;
-}) {
-  const { scene } = useGLTF(url);
-  const cloned = useMemo(() => SkeletonUtils.clone(scene) as THREE.Group, [scene]);
-
-  // Auto-fit: normalize the model to a fixed world height and center it,
-  // regardless of the GLB's native scale (this avatar is exported huge).
-  const fit = useMemo(() => {
-    cloned.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(cloned);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-    const TARGET_H = 2.2;                        // full-body height in world units
-    let baseScale = TARGET_H / size.y;
-    if (!isFinite(baseScale) || baseScale <= 0) {
-      baseScale = 1;
-      center.set(0, 0, 0);
-    }
-    return { baseScale, center };
-  }, [cloned]);
-
-  const bonesRef = useRef<Map<string, THREE.Bone>>(new Map());
-
-  useEffect(() => {
-    const map = new Map<string, THREE.Bone>();
-    const add = (b: THREE.Bone) => {
-      map.set(b.name, b);
-      map.set(normBone(b.name), b); // normalized key for fuzzy match
-      // Remember rest rotation so poses can be applied as offsets (rig-agnostic)
-      const anyB = b as THREE.Bone & { __rest?: THREE.Euler };
-      if (!anyB.__rest) anyB.__rest = b.rotation.clone();
-    };
-    // Authoritative: bones actually used for skinning
-    cloned.traverse(obj => {
-      const sm = obj as THREE.SkinnedMesh;
-      if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.bones.forEach(add);
-    });
-    // Fallback: anything flagged as a Bone
-    cloned.traverse(obj => { if ((obj as THREE.Bone).isBone) add(obj as THREE.Bone); });
-    bonesRef.current = map;
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[SignAvatar] bones found:', [...map.keys()].join(', '));
-    }
-  }, [cloned]);
-
-  // ── Clip player (hybrid): real animation clips when available, else procedural ──
-  const mixer = useMemo(() => new THREE.AnimationMixer(cloned), [cloned]);
-  const actionsRef       = useRef<Map<string, THREE.AnimationAction>>(new Map());
-  const currentActionRef = useRef<THREE.AnimationAction | null>(null);
-  const clipPlayingRef   = useRef(false);
-  const attemptedRef     = useRef<Set<string>>(new Set());
-
-  // Reset cached clips when the avatar model or language changes
-  useEffect(() => {
-    actionsRef.current.clear();
-    attemptedRef.current.clear();
-  }, [cloned, language]);
-
-  // Auto-load a real motion clip per gloss in the current sequence.
-  // Resolution: explicit SIGN_CLIPS[lang][GLOSS] override, else convention
-  //   /clips/<lang>/<GLOSS>.fbx   (drop StudioGalt "No Mesh Mixamo" FBX there).
-  // Missing file -> silently stays procedural.
-  useEffect(() => {
-    const nameByNorm = new Map<string, string>();
-    cloned.traverse(o => { if ((o as THREE.Bone).isBone) nameByNorm.set(normBone(o.name), o.name); });
-    let cancelled = false;
-
-    const ingest = (gloss: string, animations: THREE.AnimationClip[]) => {
-      if (cancelled || !animations.length) return;
-      const clip = animations[0];
-      // Keep rotation-only tracks (drop root position/scale -> no fling/rescale),
-      // retarget node names (mixamorig*/suffixed) onto this skeleton's bones.
-      clip.tracks = clip.tracks.filter(t => {
-        const dot = t.name.indexOf('.');
-        if (dot < 0) return false;
-        const prop = t.name.slice(dot + 1);
-        if (!prop.startsWith('quaternion') && !prop.startsWith('rotation')) return false;
-        const real = nameByNorm.get(normBone(t.name.slice(0, dot)));
-        if (real) t.name = real + '.' + prop;
-        return !!real;
-      });
-      if (clip.tracks.length === 0) return;
-      const action = mixer.clipAction(clip);
-      action.clampWhenFinished = true;
-      action.setLoop(THREE.LoopOnce, 1);
-      actionsRef.current.set(gloss, action);
-    };
-
-    const onErr = () => {/* missing/failed clip -> procedural fallback */};
-    const gltf = new GLTFLoader();
-    const fbx  = new FBXLoader();
-    const lang = language.toLowerCase();
-    const glosses = Array.from(new Set(glossSequence.map(g => g.gloss.toUpperCase())));
-    glosses.forEach(gloss => {
-      if (attemptedRef.current.has(gloss) || actionsRef.current.has(gloss)) return;
-      attemptedRef.current.add(gloss);
-      const explicit = SIGN_CLIPS[language]?.[gloss];
-      const url = explicit ?? `/clips/${lang}/${encodeURIComponent(gloss)}.fbx`;
-      if (url.toLowerCase().endsWith('.fbx')) {
-        fbx.load(url, obj => ingest(gloss, obj.animations), undefined, onErr);
-      } else {
-        gltf.load(url, g => ingest(gloss, g.animations), undefined, onErr);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [cloned, mixer, language, glossSequence]);
-
-  const stopClip = () => {
-    if (currentActionRef.current) { currentActionRef.current.fadeOut(0.12); currentActionRef.current = null; }
-    clipPlayingRef.current = false;
-  };
-
-  const elapsedRef  = useRef(0);
-  const prevIdxRef  = useRef(-1);
-  const poseRef     = useRef<FullPose>(NEUTRAL);
-  const idleRef     = useRef(0);
-
-  useEffect(() => {
-    elapsedRef.current = 0;
-    prevIdxRef.current = -1;
-    poseRef.current    = NEUTRAL;
-    stopClip();
-  }, [glossSequence]);
-
-  useFrame((_, delta) => {
-    idleRef.current += delta;
-    const B = bonesRef.current;
-    const alpha = Math.min(0.09 + delta * 2.5, 0.22);
-
-    // Subtle breathing on spine
-    const breathe = Math.sin(idleRef.current * 1.1) * 0.008;
-    const spine = findBone(B, 'Spine');
-    if (spine) spine.rotation.x += (boneRest(spine).x + breathe - spine.rotation.x) * 0.04;
-
-    if (!isPlaying || glossSequence.length === 0) {
-      if (clipPlayingRef.current) stopClip();
-      applyPose(NEUTRAL, B, 0.04);
-      return;
-    }
-
-    elapsedRef.current += delta * 1000 * playbackSpeed;
-    const ms = elapsedRef.current;
-    let activeIdx = -1;
-    for (let i = 0; i < glossSequence.length; i++) {
-      if (ms >= glossSequence[i].startMs && ms < glossSequence[i].endMs) { activeIdx = i; break; }
-    }
-
-    if (activeIdx !== prevIdxRef.current) {
-      prevIdxRef.current = activeIdx;
-      if (activeIdx >= 0) {
-        const action = actionsRef.current.get(glossSequence[activeIdx].gloss.toUpperCase());
-        if (action) {
-          // real clip available -> play it, skip procedural this gloss
-          currentActionRef.current?.fadeOut(0.12);
-          action.reset().fadeIn(0.12).play();
-          currentActionRef.current = action;
-          clipPlayingRef.current = true;
-        } else {
-          stopClip();
-          poseRef.current = resolvePose(glossSequence[activeIdx], language);
-        }
-        onGlossChange?.(activeIdx);
-      } else if (ms >= (glossSequence[glossSequence.length - 1]?.endMs ?? 0)) {
-        elapsedRef.current = 0;
-        prevIdxRef.current = -1;
-        poseRef.current    = NEUTRAL;
-        stopClip();
-        onAnimationComplete?.();
-      }
-    }
-
-    if (clipPlayingRef.current) {
-      mixer.update(delta * playbackSpeed); // clip drives the bones
-    } else {
-      applyPose(poseRef.current, B, alpha); // procedural fallback
-
-      // Intra-sign "stroke": real signs move, they aren't frozen holds. Add a
-      // small additive motion to the forearms/wrist that swells mid-sign and
-      // fades at the boundaries (half-sine envelope), so each held pose reads as
-      // a living gesture instead of a static snapshot.
-      if (activeIdx >= 0 && poseRef.current !== NEUTRAL) {
-        const g = glossSequence[activeIdx];
-        const dur = Math.max(1, g.endMs - g.startMs);
-        const p = Math.min(1, Math.max(0, (ms - g.startMs) / dur)); // 0..1 progress
-        const env = Math.sin(p * Math.PI);                          // 0→1→0 swell
-        const stroke = Math.sin(idleRef.current * 7.5) * 0.06 * env;
-        const rFore = findBone(B, 'RightForeArm');
-        const lFore = findBone(B, 'LeftForeArm');
-        if (rFore) rFore.rotation.x += stroke;
-        if (lFore) lFore.rotation.x += stroke * 0.5;
-        const rWrist = findBone(B, 'RightHand');
-        if (rWrist) rWrist.rotation.z += stroke * 0.7;
-      }
-
-      // Head/neck life while signing — gentle nod + tilt for natural expression
-      const nod  = Math.sin(idleRef.current * 2.3) * 0.05;
-      const tilt = Math.sin(idleRef.current * 1.4) * 0.045;
-      const head = findBone(B, 'Head');
-      if (head) {
-        const hr = boneRest(head);
-        head.rotation.x += (hr.x + 0.05 + nod - head.rotation.x) * 0.09;
-        head.rotation.z += (hr.z + tilt - head.rotation.z) * 0.09;
-      }
-      const neck = findBone(B, 'Neck');
-      if (neck) {
-        const nr = boneRest(neck);
-        neck.rotation.x += (nr.x + nod * 0.5 - neck.rotation.x) * 0.06;
-      }
-    }
-  });
-
-  // scale = user zoom multiplier (~1). Normalize, then re-center the bbox at origin,
-  // biased slightly downward so the head/torso/hands sit in frame.
-  const s = fit.baseScale * scale;
-  return (
-    <primitive
-      object={cloned}
-      scale={s}
-      position={[-fit.center.x * s, -fit.center.y * s - 0.15, -fit.center.z * s]}
-    />
-  );
-}
-
-// ─── Bone animation ───────────────────────────────────────────────────────────
-const MAX_PROX = 1.1; // radians, finger proximal curl
-const MAX_MID  = 0.85;
-const MAX_DIST = 0.7; // distal (3rd) joint curl — adds natural finger articulation
-
-function applyPose(pose: FullPose, B: Map<string, THREE.Bone>, a: number) {
-  const { L, R } = pose;
-
-  // Arms
-  lerpBone(findBone(B,'LeftArm'),     L.upper[0], L.upper[1], L.upper[2], a);
-  lerpBone(findBone(B,'RightArm'),    R.upper[0], R.upper[1], R.upper[2], a);
-  lerpBone(findBone(B,'LeftForeArm'), L.lower[0], L.lower[1], L.lower[2], a);
-  lerpBone(findBone(B,'RightForeArm'),R.lower[0], R.lower[1], R.lower[2], a);
-  lerpBone(findBone(B,'LeftHand'),    L.wrist[0], L.wrist[1], L.wrist[2], a);
-  lerpBone(findBone(B,'RightHand'),   R.wrist[0], R.wrist[1], R.wrist[2], a);
-
-  // Left fingers [index, middle, ring, pinky] — proximal, mid, distal joints
-  const lf = L.hand.fingers;
-  lerpBoneX(findBone(B,'LI1'), -lf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'LI2'), -lf[0]*MAX_MID, a); lerpBoneX(findBone(B,'LI3'), -lf[0]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'LM1'), -lf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'LM2'), -lf[1]*MAX_MID, a); lerpBoneX(findBone(B,'LM3'), -lf[1]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'LR1'), -lf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'LR2'), -lf[2]*MAX_MID, a); lerpBoneX(findBone(B,'LR3'), -lf[2]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'LP1'), -lf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'LP2'), -lf[3]*MAX_MID, a); lerpBoneX(findBone(B,'LP3'), -lf[3]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'LT1'), L.hand.thumb*0.5 - 0.1, a);
-  lerpBoneX(findBone(B,'LT2'), L.hand.thumb*0.4, a);
-  lerpBoneX(findBone(B,'LT3'), L.hand.thumb*0.3, a);
-
-  // Right fingers
-  const rf = R.hand.fingers;
-  lerpBoneX(findBone(B,'RI1'), -rf[0]*MAX_PROX, a); lerpBoneX(findBone(B,'RI2'), -rf[0]*MAX_MID, a); lerpBoneX(findBone(B,'RI3'), -rf[0]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'RM1'), -rf[1]*MAX_PROX, a); lerpBoneX(findBone(B,'RM2'), -rf[1]*MAX_MID, a); lerpBoneX(findBone(B,'RM3'), -rf[1]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'RR1'), -rf[2]*MAX_PROX, a); lerpBoneX(findBone(B,'RR2'), -rf[2]*MAX_MID, a); lerpBoneX(findBone(B,'RR3'), -rf[2]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'RP1'), -rf[3]*MAX_PROX, a); lerpBoneX(findBone(B,'RP2'), -rf[3]*MAX_MID, a); lerpBoneX(findBone(B,'RP3'), -rf[3]*MAX_DIST, a);
-  lerpBoneX(findBone(B,'RT1'), R.hand.thumb*0.5 - 0.1, a);
-  lerpBoneX(findBone(B,'RT2'), R.hand.thumb*0.4, a);
-  lerpBoneX(findBone(B,'RT3'), R.hand.thumb*0.3, a);
-}
-
-function lerpBoneX(bone: THREE.Bone | null, target: number, a: number) {
-  if (!bone) return;
-  const rx = boneRest(bone).x;
-  bone.rotation.x += (rx + target - bone.rotation.x) * a;
-}
-
-// ─── Fallback placeholder (shown while GLB not yet placed) ───────────────────
-function FallbackAvatar() {
-  return (
-    <group position={[0, -0.8, 0]}>
-      {/* Body */}
-      <mesh position={[0, 1.1, 0]}>
-        <capsuleGeometry args={[0.18, 0.55, 6, 12]} />
-        <meshStandardMaterial color="#3B82F6" roughness={0.5} />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0, 1.75, 0]}>
-        <sphereGeometry args={[0.18, 24, 24]} />
-        <meshStandardMaterial color="#E8B89A" roughness={0.5} />
-      </mesh>
-      {/* Eyes */}
-      {([-0.065, 0.065] as const).map((x, i) => (
-        <mesh key={i} position={[x, 1.77, 0.16]}>
-          <sphereGeometry args={[0.022, 12, 12]} />
-          <meshStandardMaterial color="#F8F8F8" roughness={0.1} />
-        </mesh>
-      ))}
-      <mesh position={[0, 1.68, 0.17]}>
-        <sphereGeometry args={[0.016, 10, 8]} />
-        <meshStandardMaterial color="#E8B89A" roughness={0.5} />
-      </mesh>
-    </group>
-  );
-}
-
-// ─── Loading spinner overlay ──────────────────────────────────────────────────
-function LoadingFallback() {
-  return (
-    <group>
-      <FallbackAvatar />
-    </group>
-  );
-}
-
-// ─── Detect if avatar.glb exists by preloading ───────────────────────────────
-// We always try to load; if it fails we catch it with an error boundary.
-// Local human avatar (bundled, reliable, full finger bones). Poses are applied as
-// OFFSETS from each bone's rest rotation (see applyPose), so this works regardless
-// of the rig's bind pose. Override with VITE_AVATAR_URL to use a different model.
-const DEFAULT_AVATAR_URL = '/ready_player_me_male_avatar__vrchatgame.glb';
-const AVATAR_URL = import.meta.env.VITE_AVATAR_URL || DEFAULT_AVATAR_URL;
-
-// ─── Sign animation clips (drop-in, optional) ────────────────────────────────
-// Hybrid signing: if a gloss has a real animation clip here, play the clip
-// (accurate motion); otherwise fall back to the procedural pose engine below.
-// Clips must target an RPM/Mixamo-compatible skeleton (same bone names) so they
-// retarget cleanly onto this avatar. Add entries as you acquire clips, e.g.:
-//   HELLO: '/clips/hello.glb',
-// Free source: mixamo.com (download "With Skin" off / animation-only FBX -> GLB).
-// ── Real motion clips (zero-config, drop-in) ─────────────────────────────────
-// Clips auto-load by gloss name — NO mapping needed for the common case:
-//   put  client/public/clips/asl/HELLO.fbx  ->  the "HELLO" gloss plays it.
-// Filename = GLOSS in UPPERCASE, language folder = asl | isl, .fbx or .glb.
-// Source: StudioGalt Sign-Language-Mocap-Archive (CC0) — use the "No Mesh Mixamo"
-// FBX (Mixamo rig); it retargets cleanly onto this avatar.
-//
-// This map is only for OVERRIDES — when a file is named differently or lives
-// elsewhere, e.g.  ASL: { 'THANK-YOU': '/clips/asl/thank_you_v2.fbx' }
-export const SIGN_CLIPS: Record<SignLang, Record<string, string>> = {
-  ASL: {},
-  ISL: {},
-};
-
-// ─── Error boundary for missing GLB ──────────────────────────────────────────
-class GLBErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  render() {
-    if (this.state.failed) {
-      return <LoadingFallback />;
-    }
-    return this.props.children;
-  }
-}
-
-// ─── Main scene wrapper ───────────────────────────────────────────────────────
-function AvatarScene(props: {
-  scale: number;
-  glossSequence: GlossEntry[];
-  isPlaying: boolean;
-  playbackSpeed: number;
-  language?: SignLang;
-  onGlossChange?: (i: number) => void;
-  onAnimationComplete?: () => void;
-}) {
-  return (
-    <GLBErrorBoundary>
-      <Suspense fallback={<LoadingFallback />}>
-        <GLBAvatar url={AVATAR_URL} {...props} />
-      </Suspense>
-    </GLBErrorBoundary>
-  );
-}
-
-// ─── Zoom button ──────────────────────────────────────────────────────────────
-function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: '50%',
-        border: '1.5px solid rgba(255,255,255,0.25)',
-        background: 'rgba(15,23,42,0.55)',
-        backdropFilter: 'blur(6px)',
-        color: '#fff',
-        fontSize: 20,
-        lineHeight: 1,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 400,
-        userSelect: 'none',
-        transition: 'background 0.15s',
-      }}
-      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.7)')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'rgba(15,23,42,0.55)')}
-    >
-      {label}
-    </button>
-  );
-}
-
-// ─── Public component ─────────────────────────────────────────────────────────
-// scale is now a zoom multiplier applied on top of auto-fit normalization
-const MIN_SCALE = 0.6;
-const MAX_SCALE = 1.8;
-const STEP      = 0.1;
-const BASE_SCALE = 1.0;
+// Fixed presenter styling (the studio-config UI isn't part of SignSetu).
+const SKIN = '#f3d1b6';
+const SKIN_ACCENT = '#e0ac8d';
+const WARDROBE = { primary: '#f8f9fa', shadow: '#e9ecef', accent: '#dae0e5' };
+const HAIR = '#5c4033';
 
 export function SignAvatar({
   glossSequence = [],
@@ -730,83 +52,425 @@ export function SignAvatar({
   onGlossChange,
   onAnimationComplete,
 }: SignAvatarProps) {
-  const [avatarScale, setAvatarScale] = useState(BASE_SCALE);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const zoomIn  = () => setAvatarScale(s => Math.min(+(s + STEP).toFixed(3), MAX_SCALE));
-  const zoomOut = () => setAvatarScale(s => Math.max(+(s - STEP).toFixed(3), MIN_SCALE));
-  const reset   = () => setAvatarScale(BASE_SCALE);
+  // Mutable playback state (kept in refs so the RAF loop never restarts mid-play).
+  const seqRef = useRef<GlossEntry[]>(glossSequence);
+  const playingRef = useRef(isPlaying);
+  const speedRef = useRef(playbackSpeed);
+  const elapsedRef = useRef(0);
+  const lastTsRef = useRef(0);
+  const activeIdxRef = useRef(-1);
+  const completedRef = useRef(false);
+  const poseRef = useRef<Pose>(REST_POSE);
 
-  const pct = Math.round(((avatarScale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)) * 100);
+  // Keep refs in sync with props without tearing down the animation loop.
+  useEffect(() => {
+    // New sequence → restart playback clock.
+    seqRef.current = glossSequence;
+    elapsedRef.current = 0;
+    activeIdxRef.current = -1;
+    completedRef.current = false;
+  }, [glossSequence]);
+  useEffect(() => { playingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { speedRef.current = playbackSpeed; }, [playbackSpeed]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let raf = 0;
+    lastTsRef.current = performance.now();
+
+    const frame = (now: number) => {
+      const delta = now - lastTsRef.current;
+      lastTsRef.current = now;
+
+      const seq = seqRef.current;
+      const breath = Math.sin(now / 1000) * 1.8;
+
+      // ── Advance playback clock ──────────────────────────────────────────────
+      if (playingRef.current && seq.length > 0) {
+        elapsedRef.current += delta * speedRef.current;
+        const total = seq[seq.length - 1].endMs;
+        const ms = elapsedRef.current;
+
+        if (ms >= total) {
+          if (!completedRef.current) {
+            completedRef.current = true;
+            poseRef.current = REST_POSE;
+            onAnimationComplete?.();
+          }
+        } else {
+          completedRef.current = false;
+          // Find active gloss
+          let idx = -1;
+          for (let i = 0; i < seq.length; i++) {
+            if (ms >= seq[i].startMs && ms < seq[i].endMs) { idx = i; break; }
+          }
+          if (idx !== activeIdxRef.current) {
+            activeIdxRef.current = idx;
+            if (idx >= 0) onGlossChange?.(idx);
+          }
+          if (idx >= 0) {
+            poseRef.current = poseForGloss(seq, idx, ms);
+          }
+        }
+      } else if (seq.length === 0) {
+        poseRef.current = REST_POSE;
+      }
+
+      // ── Render ──────────────────────────────────────────────────────────────
+      const shifted = applyBreathing(poseRef.current, breath);
+      drawBackground(ctx, CANVAS_W, CANVAS_H);
+      drawShadow(ctx, shifted);
+      drawHuman(ctx, shifted);
+      const caption = activeIdxRef.current >= 0 && playingRef.current && !completedRef.current
+        ? glossLabel(seq[activeIdxRef.current])
+        : '';
+      drawCaption(ctx, CANVAS_W, CANVAS_H, caption);
+
+      raf = requestAnimationFrame(frame);
+    };
+
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+    // language intentionally excluded — pose resolution reads it via closure-free refs
+  }, [onGlossChange, onAnimationComplete]);
 
   return (
-    <div
-      className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl overflow-hidden"
-      style={{ position: 'relative' }}
-    >
-      <Canvas camera={{ position: [0, 0.1, 4.8], fov: 30 }} gl={{ antialias: true }}>
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[2, 5, 4]}  intensity={1.4} castShadow />
-        <directionalLight position={[-2, 3, 2]} intensity={0.5} color="#ffe8d6" />
-        <directionalLight position={[0, -1, 3]} intensity={0.15} color="#b0c8ff" />
-        <Environment preset="studio" />
-        <AvatarScene
-          scale={avatarScale}
-          glossSequence={glossSequence}
-          isPlaying={isPlaying}
-          playbackSpeed={playbackSpeed}
-          language={language}
-          onGlossChange={onGlossChange}
-          onAnimationComplete={onAnimationComplete}
-        />
-        <OrbitControls
-          target={[0, 0.1, 0]}
-          enableZoom={false}
-          enablePan={false}
-          minPolarAngle={Math.PI / 4}
-          maxPolarAngle={Math.PI / 1.8}
-          minAzimuthAngle={-Math.PI / 4}
-          maxAzimuthAngle={Math.PI / 4}
-        />
-      </Canvas>
-
-      {/* Zoom controls overlay */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 14,
-          right: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-          zIndex: 10,
-        }}
-      >
-        <ZoomBtn label="+" onClick={zoomIn} />
-        {/* percentage pill */}
-        <button
-          onClick={reset}
-          title="Reset zoom"
-          style={{
-            fontSize: 11,
-            color: 'rgba(255,255,255,0.8)',
-            background: 'rgba(15,23,42,0.45)',
-            border: '1px solid rgba(255,255,255,0.15)',
-            borderRadius: 12,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            backdropFilter: 'blur(4px)',
-            userSelect: 'none',
-          }}
-        >
-          {pct}%
-        </button>
-        <ZoomBtn label="−" onClick={zoomOut} />
-      </div>
+    <div className="relative w-full h-full rounded-xl overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900">
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_W}
+        height={CANVAS_H}
+        className="w-full h-full object-contain select-none"
+      />
     </div>
   );
 }
 
-// Preload hint so Three.js starts fetching early
-useGLTF.preload(AVATAR_URL);
+// ─── Playback helpers ─────────────────────────────────────────────────────────
+// Double-stage blend: 0–35% transition from previous sign's end, 35–100% execute.
+function poseForGloss(seq: GlossEntry[], idx: number, ms: number): Pose {
+  const block = seq[idx];
+  const progress = (ms - block.startMs) / Math.max(1, block.endMs - block.startMs);
+  const keys = resolveKeyframes(block.gloss, block.fingerspell);
 
+  let prev = REST_POSE;
+  if (idx > 0) {
+    const pk = resolveKeyframes(seq[idx - 1].gloss, seq[idx - 1].fingerspell);
+    prev = pk[pk.length - 1];
+  }
+
+  if (progress < 0.35) {
+    return interpolatePose(prev, keys[0], progress / 0.35);
+  }
+  const subT = (progress - 0.35) / 0.65;
+  return keys.length > 1 ? interpolatePose(keys[0], keys[1], subT) : keys[0];
+}
+
+function glossLabel(entry: GlossEntry): string {
+  return entry.fingerspell && entry.gloss.length === 1 ? `${entry.gloss} ·` : entry.gloss;
+}
+
+function applyBreathing(p: Pose, breath: number): Pose {
+  const s = AVATAR_Y_SHIFT;
+  return {
+    ...p,
+    head: { ...p.head, y: p.head.y + s + breath * 0.4 },
+    neck: { ...p.neck, y: p.neck.y + s + breath * 0.6 },
+    chest: { ...p.chest, y: p.chest.y + s + breath * 0.8 },
+    leftShoulder: { ...p.leftShoulder, y: p.leftShoulder.y + s + breath * 0.7 },
+    rightShoulder: { ...p.rightShoulder, y: p.rightShoulder.y + s + breath * 0.7 },
+    leftElbow: { ...p.leftElbow, y: p.leftElbow.y + s },
+    rightElbow: { ...p.rightElbow, y: p.rightElbow.y + s },
+    leftWrist: { ...p.leftWrist, y: p.leftWrist.y + s },
+    rightWrist: { ...p.rightWrist, y: p.rightWrist.y + s },
+  };
+}
+
+// ─── Canvas drawing ───────────────────────────────────────────────────────────
+function drawBackground(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, w, h);
+  const grad = ctx.createRadialGradient(w / 2, h / 3, 50, w / 2, h / 2, h);
+  grad.addColorStop(0, 'rgba(255,255,255,0.6)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.03)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Minimalist floor
+  const floorY = 520;
+  ctx.fillStyle = '#fcf9f5';
+  ctx.fillRect(0, floorY, w, h - floorY);
+  ctx.strokeStyle = '#eae2d8';
+  ctx.lineWidth = 1.8;
+  for (let x = -200; x <= w + 200; x += 100) {
+    ctx.beginPath();
+    ctx.moveTo(x, floorY);
+    ctx.lineTo(x + (x - w / 2) * 1.5, h);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, floorY - 12, w, 12);
+}
+
+function drawShadow(ctx: CanvasRenderingContext2D, p: Pose) {
+  ctx.save();
+  ctx.filter = 'blur(18px)';
+  ctx.fillStyle = 'rgba(0,0,0,0.055)';
+  const dx = -45;
+  const dy = 15;
+  ctx.beginPath();
+  ctx.arc(p.head.x + dx, p.head.y + dy, 68, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(p.leftShoulder.x + dx - 20, p.leftShoulder.y + dy + 150);
+  ctx.quadraticCurveTo(p.leftShoulder.x + dx - 10, p.leftShoulder.y + dy, p.chest.x + dx, p.chest.y + dy);
+  ctx.quadraticCurveTo(p.rightShoulder.x + dx + 10, p.rightShoulder.y + dy, p.rightShoulder.x + dx + 20, p.rightShoulder.y + dy + 150);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHuman(ctx: CanvasRenderingContext2D, p: Pose) {
+  // Torso
+  ctx.fillStyle = WARDROBE.primary;
+  ctx.beginPath();
+  ctx.moveTo(p.leftShoulder.x - 30, ctx.canvas.height);
+  ctx.lineTo(p.leftShoulder.x - 10, p.leftShoulder.y + 40);
+  ctx.quadraticCurveTo(p.leftShoulder.x, p.leftShoulder.y, p.neck.x - 20, p.neck.y + 20);
+  ctx.lineTo(p.neck.x + 20, p.neck.y + 20);
+  ctx.quadraticCurveTo(p.rightShoulder.x, p.rightShoulder.y, p.rightShoulder.x + 10, p.rightShoulder.y + 40);
+  ctx.lineTo(p.rightShoulder.x + 30, ctx.canvas.height);
+  ctx.closePath();
+  ctx.fill();
+
+  // Neck shadow + neck
+  ctx.fillStyle = SKIN_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(p.neck.x - 18, p.neck.y);
+  ctx.quadraticCurveTo(p.neck.x, p.neck.y + 15, p.neck.x + 18, p.neck.y);
+  ctx.lineTo(p.neck.x + 15, p.neck.y + 35);
+  ctx.quadraticCurveTo(p.neck.x, p.neck.y + 45, p.neck.x - 15, p.neck.y + 35);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.moveTo(p.neck.x - 16, p.neck.y - 10);
+  ctx.lineTo(p.neck.x - 16, p.neck.y + 25);
+  ctx.quadraticCurveTo(p.neck.x, p.neck.y + 32, p.neck.x + 16, p.neck.y + 25);
+  ctx.lineTo(p.neck.x + 16, p.neck.y - 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.arc(p.head.x, p.head.y, 56, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(244,63,94,0.12)';
+  ctx.beginPath();
+  ctx.arc(p.head.x - 25, p.head.y + 12, 10, 0, Math.PI * 2);
+  ctx.arc(p.head.x + 25, p.head.y + 12, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hair (contemporary)
+  ctx.fillStyle = HAIR;
+  ctx.beginPath();
+  ctx.arc(p.head.x, p.head.y - 18, 58, Math.PI, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(p.head.x, p.head.y - 56, 42, 24, -0.05, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(p.head.x - 58, p.head.y - 15, 12, 35);
+  ctx.fillRect(p.head.x + 46, p.head.y - 15, 12, 35);
+
+  // Face
+  ctx.save();
+  ctx.translate(p.head.x, p.head.y);
+  ctx.rotate(p.headTilt);
+  const eyebrowY = -18 - p.eyebrowsHeight * 5;
+  ctx.strokeStyle = '#374151';
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-30, eyebrowY); ctx.quadraticCurveTo(-18, eyebrowY - 3, -10, eyebrowY); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(10, eyebrowY); ctx.quadraticCurveTo(18, eyebrowY - 3, 30, eyebrowY); ctx.stroke();
+
+  if (p.eyesClosed) {
+    ctx.strokeStyle = '#111827';
+    ctx.beginPath(); ctx.arc(-20, -5, 6, Math.PI, 0, true); ctx.stroke();
+    ctx.beginPath(); ctx.arc(20, -5, 6, Math.PI, 0, true); ctx.stroke();
+  } else {
+    ctx.fillStyle = '#111827';
+    ctx.beginPath(); ctx.arc(-20, -6, 5.5, 0, Math.PI * 2); ctx.arc(20, -6, 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(-22, -8, 1.8, 0, Math.PI * 2); ctx.arc(18, -8, 1.8, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.strokeStyle = SKIN_ACCENT;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 8); ctx.lineTo(4, 8); ctx.stroke();
+
+  const mW = p.mouthWidth;
+  if (p.mouthScaleY <= 0.1) {
+    ctx.beginPath();
+    ctx.moveTo(-mW / 2, 22); ctx.quadraticCurveTo(0, 28, mW / 2, 22);
+    ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.stroke();
+  } else {
+    ctx.fillStyle = '#f43f5e'; ctx.strokeStyle = '#9f1239'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-mW / 2, 20);
+    ctx.quadraticCurveTo(0, 20 + p.mouthScaleY * 25, mW / 2, 20);
+    ctx.quadraticCurveTo(0, 18, -mW / 2, 20);
+    ctx.fill(); ctx.stroke();
+    if (p.mouthScaleY > 0.3) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-mW / 3, 21, (mW * 2) / 3, 3);
+    }
+  }
+  ctx.restore();
+
+  // Collar + buttons
+  ctx.strokeStyle = WARDROBE.accent;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(p.neck.x - 24, p.neck.y + 24);
+  ctx.lineTo(p.neck.x, p.neck.y + 60);
+  ctx.lineTo(p.neck.x + 24, p.neck.y + 24);
+  ctx.stroke();
+  ctx.fillStyle = WARDROBE.shadow;
+  ctx.beginPath();
+  ctx.arc(p.neck.x, p.neck.y + 80, 4, 0, Math.PI * 2);
+  ctx.arc(p.neck.x, p.neck.y + 120, 4, 0, Math.PI * 2);
+  ctx.arc(p.neck.x, p.neck.y + 160, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Sleeves
+  ctx.strokeStyle = WARDROBE.primary;
+  ctx.lineWidth = 44;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(p.leftShoulder.x, p.leftShoulder.y);
+  ctx.lineTo(p.leftElbow.x, p.leftElbow.y);
+  ctx.lineTo(p.leftWrist.x, p.leftWrist.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.rightShoulder.x, p.rightShoulder.y);
+  ctx.lineTo(p.rightElbow.x, p.rightElbow.y);
+  ctx.lineTo(p.rightWrist.x, p.rightWrist.y);
+  ctx.stroke();
+
+  // Skin cuffs
+  ctx.strokeStyle = SKIN;
+  ctx.lineWidth = 14;
+  ctx.beginPath();
+  ctx.moveTo(p.leftWrist.x, p.leftWrist.y);
+  ctx.lineTo(p.leftWrist.x - Math.cos(p.leftHandRotation) * 14, p.leftWrist.y - Math.sin(p.leftHandRotation) * 14);
+  ctx.moveTo(p.rightWrist.x, p.rightWrist.y);
+  ctx.lineTo(p.rightWrist.x - Math.cos(p.rightHandRotation) * 14, p.rightWrist.y - Math.sin(p.rightHandRotation) * 14);
+  ctx.stroke();
+
+  drawHand(ctx, p.leftWrist, p.leftFingersState, p.leftHandRotation, true);
+  drawHand(ctx, p.rightWrist, p.rightFingersState, p.rightHandRotation, false);
+}
+
+function drawHand(
+  ctx: CanvasRenderingContext2D,
+  wrist: Joint,
+  state: FingerState,
+  rotation: number,
+  isLeft: boolean,
+) {
+  ctx.save();
+  ctx.translate(wrist.x, wrist.y);
+  ctx.rotate(rotation);
+  ctx.scale(isLeft ? -1 : 1, 1);
+
+  ctx.fillStyle = SKIN;
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = SKIN;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 5.2;
+
+  if (state === 'open' || state === 'flat') {
+    ctx.beginPath(); ctx.moveTo(12, 0); ctx.quadraticCurveTo(24, 6, 26, 12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, -12); ctx.lineTo(14, -40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(1, -44); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-8, -12); ctx.lineTo(-10, -39); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-14, -6); ctx.lineTo(-24, -30); ctx.stroke();
+  } else if (state === 'point') {
+    ctx.beginPath(); ctx.moveTo(4, -12); ctx.lineTo(6, -45); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(16, -6); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.beginPath();
+    ctx.arc(-2, -6, 5, 0, Math.PI * 2); ctx.arc(-8, -4, 4.5, 0, Math.PI * 2); ctx.arc(-13, -2, 4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (state === 'fist') {
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.beginPath();
+    ctx.arc(4, -6, 5, 0, Math.PI * 2); ctx.arc(-1, -6, 5, 0, Math.PI * 2);
+    ctx.arc(-6, -5, 4.8, 0, Math.PI * 2); ctx.arc(-11, -4, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (state === 'hook') {
+    ctx.beginPath(); ctx.moveTo(4, -10); ctx.quadraticCurveTo(14, -28, 6, -30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-2, -10); ctx.quadraticCurveTo(4, -26, -3, -28); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.beginPath(); ctx.arc(-8, -4, 4.5, 0, Math.PI * 2); ctx.arc(-13, -2, 4, 0, Math.PI * 2); ctx.fill();
+  } else if (state === 'c-shape') {
+    ctx.beginPath(); ctx.moveTo(10, -12); ctx.quadraticCurveTo(24, -28, 14, -38); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2, -14); ctx.quadraticCurveTo(12, -30, 4, -40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6, -11); ctx.quadraticCurveTo(2, -26, -5, -36); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(12, 4); ctx.quadraticCurveTo(22, 14, 18, 22); ctx.stroke();
+  } else if (state === 'peace') {
+    ctx.beginPath(); ctx.moveTo(6, -12); ctx.lineTo(15, -42); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-2, -14); ctx.lineTo(-7, -43); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.beginPath(); ctx.arc(-8, -4, 4.5, 0, Math.PI * 2); ctx.arc(-13, -2, 4, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCaption(ctx: CanvasRenderingContext2D, w: number, h: number, text: string) {
+  if (!text) return;
+  ctx.save();
+  const cardH = 46;
+  const cardW = w - 80;
+  const cardX = 40;
+  const cardY = h - 70;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(cardX + 12, cardY);
+  ctx.lineTo(cardX + cardW - 12, cardY);
+  ctx.quadraticCurveTo(cardX + cardW, cardY, cardX + cardW, cardY + 12);
+  ctx.lineTo(cardX + cardW, cardY + cardH - 12);
+  ctx.quadraticCurveTo(cardX + cardW, cardY + cardH, cardX + cardW - 12, cardY + cardH);
+  ctx.lineTo(cardX + 12, cardY + cardH);
+  ctx.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - 12);
+  ctx.lineTo(cardX, cardY + 12);
+  ctx.quadraticCurveTo(cardX, cardY, cardX + 12, cardY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#1f2937';
+  ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, w / 2, cardY + cardH / 2);
+  ctx.restore();
+}

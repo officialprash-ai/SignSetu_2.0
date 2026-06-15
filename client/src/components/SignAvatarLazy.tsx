@@ -14,7 +14,7 @@ function AvatarFallback() {
     <div className="w-full h-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 rounded-xl flex items-center justify-center">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
         <div className="text-4xl">🤟</div>
-        <span className="text-xs">3D avatar unavailable</span>
+        <span className="text-xs">Avatar unavailable</span>
       </div>
     </div>
   );
