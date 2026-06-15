@@ -141,7 +141,7 @@ export function SignAvatar({
   }, [onGlossChange, onAnimationComplete]);
 
   return (
-    <div className="relative w-full h-full rounded-xl overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900">
+    <div className="relative w-full h-full rounded-xl overflow-hidden bg-gradient-to-b from-slate-800 to-slate-950">
       <canvas
         ref={canvasRef}
         width={CANVAS_W}
@@ -195,44 +195,43 @@ function applyBreathing(p: Pose, breath: number): Pose {
 // ─── Canvas drawing ───────────────────────────────────────────────────────────
 function drawBackground(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#f8f8f8';
-  ctx.fillRect(0, 0, w, h);
-  const grad = ctx.createRadialGradient(w / 2, h / 3, 50, w / 2, h / 2, h);
-  grad.addColorStop(0, 'rgba(255,255,255,0.6)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.03)');
-  ctx.fillStyle = grad;
+
+  // Dark studio gradient (matches the app's slate theme) so the light-clothed
+  // avatar reads with strong contrast instead of washing out.
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#1e293b');   // slate-800
+  bg.addColorStop(1, '#0b1120');   // near slate-950
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
-  // Minimalist floor
-  const floorY = 520;
-  ctx.fillStyle = '#fcf9f5';
-  ctx.fillRect(0, floorY, w, h - floorY);
-  ctx.strokeStyle = '#eae2d8';
-  ctx.lineWidth = 1.8;
-  for (let x = -200; x <= w + 200; x += 100) {
-    ctx.beginPath();
-    ctx.moveTo(x, floorY);
-    ctx.lineTo(x + (x - w / 2) * 1.5, h);
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, floorY - 12, w, 12);
+  // Soft spotlight behind the presenter to lift the figure off the background.
+  const spot = ctx.createRadialGradient(w / 2, h * 0.34, 40, w / 2, h * 0.42, h * 0.7);
+  spot.addColorStop(0, 'rgba(96,165,250,0.18)');   // cool blue glow
+  spot.addColorStop(0.5, 'rgba(96,165,250,0.05)');
+  spot.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = spot;
+  ctx.fillRect(0, 0, w, h);
+
+  // Faint floor line for grounding (very subtle on dark).
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 540);
+  ctx.lineTo(w, 540);
+  ctx.stroke();
 }
 
 function drawShadow(ctx: CanvasRenderingContext2D, p: Pose) {
+  // On the dark backdrop a cast shadow is invisible — instead lay a soft light
+  // pool beneath the figure so it feels grounded and slightly lit from the front.
   ctx.save();
-  ctx.filter = 'blur(18px)';
-  ctx.fillStyle = 'rgba(0,0,0,0.055)';
-  const dx = -45;
-  const dy = 15;
+  ctx.filter = 'blur(26px)';
+  const glow = ctx.createRadialGradient(p.chest.x, p.chest.y + 60, 20, p.chest.x, p.chest.y + 60, 220);
+  glow.addColorStop(0, 'rgba(226,232,240,0.10)');
+  glow.addColorStop(1, 'rgba(226,232,240,0)');
+  ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(p.head.x + dx, p.head.y + dy, 68, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(p.leftShoulder.x + dx - 20, p.leftShoulder.y + dy + 150);
-  ctx.quadraticCurveTo(p.leftShoulder.x + dx - 10, p.leftShoulder.y + dy, p.chest.x + dx, p.chest.y + dy);
-  ctx.quadraticCurveTo(p.rightShoulder.x + dx + 10, p.rightShoulder.y + dy, p.rightShoulder.x + dx + 20, p.rightShoulder.y + dy + 150);
-  ctx.closePath();
+  ctx.arc(p.chest.x, p.chest.y + 60, 220, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
