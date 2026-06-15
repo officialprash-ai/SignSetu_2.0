@@ -1,4 +1,9 @@
 import { invokeLLM } from "./_core/llm";
+import { KNOWN_SIGNS } from "./vocab";
+import {
+  checkDeterministicMapping,
+  localOfflineTranslate,
+} from "./offlineTranslate";
 
 export interface GlossSequence {
   gloss: string;
@@ -15,40 +20,57 @@ const LETTER_MS   = 200;
 /** short pause inserted between fingerspelled words */
 const FS_PAUSE_MS = 100;
 
-// ─── Core ASL/ISL vocabulary ─────────────────────────────────────────────────
-const KNOWN_SIGNS = new Set([
-  'I','ME','MY','MINE','YOU','YOUR','HE','SHE','HIS','HER','IT','ITS',
-  'WE','US','OUR','THEY','THEM','THEIR',
-  'HELLO','HI','BYE','GOODBYE','GOOD','MORNING','AFTERNOON','EVENING','NIGHT',
-  'PLEASE','THANK','THANK-YOU','SORRY','WELCOME','EXCUSE',
-  'WHAT','WHERE','WHEN','WHO','WHY','HOW','WHICH',
-  'BE','IS','ARE','WAS','WERE','HAVE','HAS','HAD','DO','DID','DOES',
-  'GO','COME','WANT','NEED','LIKE','LOVE','KNOW','THINK','SEE','HEAR',
-  'SAY','TELL','ASK','GIVE','GET','TAKE','MAKE','USE','HELP',
-  'EAT','DRINK','SLEEP','WORK','PLAY','LEARN','STUDY','TEACH','READ','WRITE',
-  'BUY','SELL','PAY','OPEN','CLOSE','START','STOP','FINISH','WAIT','CALL',
-  'UNDERSTAND','REMEMBER','FORGET','FIND','LOSE','SHOW','WATCH','LISTEN',
-  'NAME','PERSON','MAN','WOMAN','BOY','GIRL','BABY','CHILD','CHILDREN','FAMILY',
-  'MOTHER','MOM','FATHER','DAD','BROTHER','SISTER','FRIEND','TEACHER','DOCTOR',
-  'HOUSE','HOME','SCHOOL','WORK','STORE','HOSPITAL','RESTAURANT','CHURCH',
-  'FOOD','WATER','MILK','COFFEE','BREAD','FRUIT','VEGETABLE','MONEY','TIME',
-  'DAY','WEEK','MONTH','YEAR','TODAY','TOMORROW','YESTERDAY','NOW','LATER',
-  'MORNING','AFTERNOON','NIGHT',
-  'CAR','BUS','TRAIN','PLANE','BOOK','PHONE','COMPUTER',
-  'CITY','COUNTRY','WORLD',
-  'ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN',
-  'FIRST','SECOND','THIRD','LAST','NEXT','BEFORE','AFTER',
-  'BIG','SMALL','TALL','SHORT','FAST','SLOW','HOT','COLD','NEW','OLD',
-  'GOOD','BAD','HAPPY','SAD','ANGRY','SCARED','SICK','WELL','TIRED','HUNGRY',
-  'FULL','EMPTY','OPEN','CLOSED','RIGHT','LEFT','UP','DOWN','HERE','THERE',
-  'SAME','DIFFERENT','EASY','HARD','IMPORTANT','BEAUTIFUL','BLACK','WHITE',
-  'RED','BLUE','GREEN','YELLOW',
-  'AND','OR','BUT','IF','BECAUSE','SO','ALSO','AGAIN','MORE','LESS','VERY',
-  'NOT','NO','YES','MAYBE','ALL','SOME','MANY','FEW','MUCH','ENOUGH',
-  'NAMASTE','INDIA','HINDI','ENGLISH',
-]);
+// ─── Circuit breaker ──────────────────────────────────────────────────────────
+// On a 429 / RESOURCE_EXHAUSTED from the LLM we trip a 5-minute cooldown and
+// route everything through the local offline translator until it expires. This
+// stops us hammering a rate-limited endpoint and keeps signing uninterrupted.
+const COOLDOWN_MS = 5 * 60 * 1000;
+let breakerOpenUntil = 0;
+
+function breakerOpen(): boolean {
+  return Date.now() < breakerOpenUntil;
+}
+function tripBreaker(): void {
+  breakerOpenUntil = Date.now() + COOLDOWN_MS;
+  console.warn(`[translation] circuit breaker tripped — offline for ${COOLDOWN_MS / 1000}s`);
+}
+function isRateLimit(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return /\b429\b|RESOURCE_EXHAUSTED|rate.?limit|quota|too many requests/i.test(m);
+}
+
+/** Exposed for diagnostics / tests. */
+export function getBreakerState(): { open: boolean; until: number } {
+  return { open: breakerOpen(), until: breakerOpenUntil };
+}
 
 export async function textToGloss(
+  text: string,
+  language: 'ASL' | 'ISL'
+): Promise<GlossSequence[]> {
+  // 1) Deterministic instant match for very common phrases — no network.
+  const deterministic = checkDeterministicMapping(text, language);
+  if (deterministic) return expandGlosses(deterministic);
+
+  // 2) LLM path (skipped while the circuit breaker is open).
+  if (!breakerOpen()) {
+    try {
+      return await llmTextToGloss(text, language);
+    } catch (error) {
+      if (isRateLimit(error)) tripBreaker();
+      console.warn(
+        '[translation] LLM failed — falling back to offline translator:',
+        error instanceof Error ? error.message : error,
+      );
+      // fall through to offline
+    }
+  }
+
+  // 3) Offline fallback — guaranteed to return, never throws.
+  return expandGlosses(localOfflineTranslate(text, language));
+}
+
+async function llmTextToGloss(
   text: string,
   language: 'ASL' | 'ISL'
 ): Promise<GlossSequence[]> {

@@ -120,6 +120,43 @@ const NAMED_POSES: Record<string, FullPose> = {
                  R:{upper:[-1.1,0.1,-0.3],lower:[-0.4,0,0.2],wrist:[0.2,0,0], hand:INDEX} },
   NAME:        { L:{upper:[0.05,0,0.45],lower:[0.3,0,0],    wrist:[0,0,0],    hand:OPEN},
                  R:{upper:[-1.0,0.2,-0.3],lower:[-0.6,0.1,0.2],wrist:[0.2,-0.2,0],hand:TWO} },
+  // ── Expanded vocabulary (reduces random fallback poses) ──────────────────────
+  FINE:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.5,0,-0.25],lower:[-0.6,0,0.1],wrist:[0,0,0],    hand:FLAT} },
+  NICE:        { L:{upper:[0.3,0,0.4], lower:[-0.5,0,0.2], wrist:[0,0.2,0],  hand:FLAT},
+                 R:{upper:[0.3,0,-0.4],lower:[-0.5,0,-0.2],wrist:[0,-0.2,0], hand:FLAT} },
+  MEET:        { L:{upper:[0.2,0,0.5], lower:[-0.6,0,0.1], wrist:[0,0,0],    hand:INDEX},
+                 R:{upper:[0.2,0,-0.5],lower:[-0.6,0,-0.1],wrist:[0,0,0],    hand:INDEX} },
+  WANT:        { L:{upper:[0.4,0,0.45],lower:[-0.6,0,0.2], wrist:[0.3,0,0],  hand:CLAW},
+                 R:{upper:[0.4,0,-0.45],lower:[-0.6,0,-0.2],wrist:[0.3,0,0], hand:CLAW} },
+  NEED:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.3,0,-0.5],lower:[-0.7,0,0],   wrist:[0.4,0,0],  hand:INDEX} },
+  COME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[-0.6,0.2,-0.4],lower:[-0.7,0,0.3],wrist:[0.2,0,0],hand:INDEX} },
+  EAT:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.7,-0.1,-0.3],lower:[-1.2,0,0],wrist:[0.2,0,0],  hand:PINCH} },
+  DRINK:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.6,-0.1,-0.3],lower:[-1.3,0,0],wrist:[0.3,0,0],  hand:CLAW} },
+  WATER:       { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.4,0,-0.4],lower:[-1.0,0,0],   wrist:[0.2,0,0],  hand:TWO } },
+  MORE:        { L:{upper:[0.4,0,0.4], lower:[-0.7,0,0.2], wrist:[0,0,0],    hand:PINCH},
+                 R:{upper:[0.4,0,-0.4],lower:[-0.7,0,-0.2],wrist:[0,0,0],    hand:PINCH} },
+  FAMILY:      { L:{upper:[0.35,0,0.4],lower:[-0.6,0,0.2], wrist:[0.1,0,0],  hand:OPEN},
+                 R:{upper:[0.35,0,-0.4],lower:[-0.6,0,-0.2],wrist:[0.1,0,0], hand:OPEN} },
+  FRIEND:      { L:{upper:[0.3,0,0.45],lower:[-0.8,0,0.2], wrist:[0,0,0],    hand:INDEX},
+                 R:{upper:[0.3,0,-0.45],lower:[-0.8,0,-0.2],wrist:[0,0,0],   hand:INDEX} },
+  HOME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.5,-0.1,-0.3],lower:[-1.0,0,0],wrist:[0.2,0,0],  hand:PINCH} },
+  SCHOOL:      { L:{upper:[0.3,0,0.5], lower:[-0.6,0,0.2], wrist:[0,0,0],    hand:FLAT},
+                 R:{upper:[0.4,0,-0.4],lower:[-0.7,0,0],   wrist:[0.3,0,0],  hand:FLAT} },
+  TODAY:       { L:{upper:[0.5,0,0.4], lower:[-0.7,0,0.2], wrist:[0.2,0,0],  hand:FLAT},
+                 R:{upper:[0.5,0,-0.4],lower:[-0.7,0,-0.2],wrist:[0.2,0,0],  hand:FLAT} },
+  TIME:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.3,0,-0.4],lower:[-0.9,0,0.2], wrist:[0,0,0],    hand:INDEX} },
+  SEE:         { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.3,0.1,-0.4],lower:[-0.9,0,0.2],wrist:[0,0,0],   hand:TWO } },
+  LIKE:        { L:{upper:[0.05,0,0.45],lower:[0,0,0],     wrist:[0,0,0],    hand:OPEN},
+                 R:{upper:[0.5,0,-0.3],lower:[-0.6,0,0.1], wrist:[0,0,0],    hand:PINCH} },
   // fallback pool
   _p0: {L:{upper:[-0.2,0,1.3],lower:[-0.3,0,0.2],wrist:[0,0,0],hand:OPEN},R:{upper:[-0.2,0,-1.3],lower:[-0.3,0,-0.2],wrist:[0,0,0],hand:OPEN}},
   _p1: {L:{upper:[-0.5,0,0.5],lower:[-0.4,0,0.2],wrist:[0.2,0,0],hand:FIST},R:{upper:[-0.5,0,-0.5],lower:[-0.4,0,-0.2],wrist:[0.2,0,0],hand:FIST}},
@@ -458,6 +495,25 @@ function GLBAvatar({
       mixer.update(delta * playbackSpeed); // clip drives the bones
     } else {
       applyPose(poseRef.current, B, alpha); // procedural fallback
+
+      // Intra-sign "stroke": real signs move, they aren't frozen holds. Add a
+      // small additive motion to the forearms/wrist that swells mid-sign and
+      // fades at the boundaries (half-sine envelope), so each held pose reads as
+      // a living gesture instead of a static snapshot.
+      if (activeIdx >= 0 && poseRef.current !== NEUTRAL) {
+        const g = glossSequence[activeIdx];
+        const dur = Math.max(1, g.endMs - g.startMs);
+        const p = Math.min(1, Math.max(0, (ms - g.startMs) / dur)); // 0..1 progress
+        const env = Math.sin(p * Math.PI);                          // 0→1→0 swell
+        const stroke = Math.sin(idleRef.current * 7.5) * 0.06 * env;
+        const rFore = findBone(B, 'RightForeArm');
+        const lFore = findBone(B, 'LeftForeArm');
+        if (rFore) rFore.rotation.x += stroke;
+        if (lFore) lFore.rotation.x += stroke * 0.5;
+        const rWrist = findBone(B, 'RightHand');
+        if (rWrist) rWrist.rotation.z += stroke * 0.7;
+      }
+
       // Head/neck life while signing — gentle nod + tilt for natural expression
       const nod  = Math.sin(idleRef.current * 2.3) * 0.05;
       const tilt = Math.sin(idleRef.current * 1.4) * 0.045;

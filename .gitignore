@@ -118,3 +118,7 @@ client/public/__manus__/version.json
 
 # Vitest debug test stubs
 server/routers/*.debug*.test.ts
+
+# vitest temp configs
+vitest.config.ts.timestamp-*.mjs
+_tmp_*
