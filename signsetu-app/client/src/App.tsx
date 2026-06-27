@@ -6,12 +6,12 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Landing from "./pages/Landing";
 import Home from "./pages/Home";
+import Login from "./pages/Login";
 import { useAuth } from "./_core/hooks/useAuth";
 
 function Router() {
   const { isAuthenticated, loading } = useAuth();
 
-  // Show loading state while checking auth
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -20,36 +20,27 @@ function Router() {
     );
   }
 
-  // make sure to consider if you need authentication for certain routes
+  if (!isAuthenticated) {
+    return (
+      <Switch>
+        <Route path="/login" component={Login} />
+        <Route component={Landing} />
+      </Switch>
+    );
+  }
+
   return (
     <Switch>
-      <Route path="/" component={isAuthenticated ? Home : Landing} />
+      <Route path="/" component={Home} />
+      <Route path="/dictionary" component={Home} />
+      <Route path="/history" component={Home} />
+      <Route path="/profile" component={Home} />
+      <Route path="/admin" component={Home} />
       <Route path="/404" component={NotFound} />
-      {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
-    <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
-  );
-}
-
-export default App;

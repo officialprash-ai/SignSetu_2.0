@@ -20,10 +20,22 @@ function Router() {
     );
   }
 
+  if (!isAuthenticated) {
+    return (
+      <Switch>
+        <Route path="/login" component={Login} />
+        <Route component={Landing} />
+      </Switch>
+    );
+  }
+
   return (
     <Switch>
-      <Route path="/" component={isAuthenticated ? Home : Landing} />
-      <Route path="/login" component={isAuthenticated ? Home : Login} />
+      <Route path="/" component={Home} />
+      <Route path="/dictionary" component={Home} />
+      <Route path="/history" component={Home} />
+      <Route path="/profile" component={Home} />
+      <Route path="/admin" component={Home} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

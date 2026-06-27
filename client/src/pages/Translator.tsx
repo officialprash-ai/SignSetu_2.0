@@ -3,7 +3,10 @@ import { useSearch } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
-import { Loader2, Pause, Play, RotateCcw, Youtube, X, Lightbulb, Upload, FileVideo, CornerRightUp } from 'lucide-react';
+import {
+  Loader2, Pause, Play, RotateCcw, Youtube, X,
+  Lightbulb, Upload, FileVideo, CornerRightUp,
+} from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { SignAvatar, type GlossEntry } from '@/components/SignAvatarLazy';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -14,21 +17,18 @@ import { cn } from '@/lib/utils';
 type InputTab = 'text' | 'voice' | 'youtube' | 'file';
 
 const TIP_KEY = 'signsetu_tip_dismissed';
-const MAX_FILE_BYTES = 25 * 1024 * 1024; // Whisper hard limit
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-// Greeting the avatar performs on load / language switch
 function buildGreeting(lang: 'ASL' | 'ISL'): GlossEntry[] {
   const gloss = lang === 'ISL' ? 'NAMASTE' : 'HELLO';
   return [{ gloss, startMs: 300, endMs: 1900, confidence: 1 }];
 }
 
-// Chunked Uint8Array → base64 (avoids stack overflow on large files)
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
+  for (let i = 0; i < bytes.length; i += chunk)
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
   return btoa(binary);
 }
 
@@ -39,7 +39,7 @@ function OnboardingTip({ onDismiss }: { onDismiss: () => void }) {
       <div className="flex-1 space-y-1">
         <p className="font-medium text-foreground">Getting started</p>
         <p className="text-muted-foreground text-xs">
-          Type a phrase, record your voice, upload a video, or paste a YouTube URL. The 3D avatar signs it back to you in real time.
+          Type a phrase, record your voice, upload a video, or paste a YouTube URL. The 3D avatar signs it back to you.
         </p>
       </div>
       <button onClick={onDismiss} className="text-muted-foreground hover:text-foreground transition-colors shrink-0" aria-label="Dismiss tip">
@@ -49,45 +49,31 @@ function OnboardingTip({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function AvatarIdleState() {
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-4 px-6 py-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-        <span className="text-3xl">🤟</span>
-      </div>
-      <div className="space-y-1.5">
-        <p className="font-semibold text-foreground">Avatar ready</p>
-        <p className="text-sm text-muted-foreground">Translate something to see it signed here</p>
-      </div>
-    </div>
-  );
-}
-
 export default function Translator() {
   const search = useSearch();
 
-  const [inputTab, setInputTab]             = useState<InputTab>('text');
-  const [inputText, setInputText]           = useState('');
-  const [youtubeUrl, setYoutubeUrl]         = useState('');
-  const [language, setLanguage]             = useState<'ASL' | 'ISL'>('ASL');
-  const [glossSequence, setGlossSequence]   = useState<GlossEntry[]>([]);
-  const [isPlaying, setIsPlaying]           = useState(false);
-  const [playbackSpeed, setPlaybackSpeed]   = useState(1);
+  const [inputTab, setInputTab]           = useState<InputTab>('text');
+  const [inputText, setInputText]         = useState('');
+  const [youtubeUrl, setYoutubeUrl]       = useState('');
+  const [language, setLanguage]           = useState<'ASL' | 'ISL'>('ASL');
+  const [glossSequence, setGlossSequence] = useState<GlossEntry[]>([]);
+  const [isPlaying, setIsPlaying]         = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [activeGlossIdx, setActiveGlossIdx] = useState(-1);
-  const [replayKey, setReplayKey]           = useState(0);
-  const [fileName, setFileName]             = useState('');
-  const [videoUrl, setVideoUrl]             = useState<string | null>(null);
-  const videoRef                            = useRef<HTMLVideoElement | null>(null);
-  const [showTip, setShowTip]               = useState(() => {
+  const [replayKey, setReplayKey]         = useState(0);
+  const [fileName, setFileName]           = useState('');
+  const [videoUrl, setVideoUrl]           = useState<string | null>(null);
+  const videoRef                          = useRef<HTMLVideoElement | null>(null);
+  const [showTip, setShowTip]             = useState(() => {
     try { return !localStorage.getItem(TIP_KEY); } catch { return true; }
   });
-  const greetedRef                          = useRef(false);
+  const greetedRef = useRef(false);
 
-  const textToSignMutation  = trpc.translation.textToSign.useMutation();
-  const youtubeMutation     = trpc.youtube.transcribe.useMutation();
-  const fileMutation        = trpc.voice.transcribe.useMutation();
-  const prefsQuery          = trpc.preferences.get.useQuery();
-  const prefsMutation       = trpc.preferences.set.useMutation();
+  const textToSignMutation = trpc.translation.textToSign.useMutation();
+  const youtubeMutation    = trpc.youtube.transcribe.useMutation();
+  const fileMutation       = trpc.voice.transcribe.useMutation();
+  const prefsQuery         = trpc.preferences.get.useQuery();
+  const prefsMutation      = trpc.preferences.set.useMutation();
 
   useEffect(() => {
     if (prefsQuery.data) {
@@ -120,18 +106,15 @@ export default function Translator() {
       setInputTab('text');
       if (replayLang === 'ASL' || replayLang === 'ISL') setLanguage(replayLang);
       setTimeout(() => {
-        textToSignMutation.mutateAsync({ text: replayText, language: replayLang ?? 'ASL' }).then(result => {
-          applyResult(result.glossSequence);
-        }).catch(() => {});
+        textToSignMutation.mutateAsync({ text: replayText, language: replayLang ?? 'ASL' })
+          .then(r => applyResult(r.glossSequence)).catch(() => {});
       }, 100);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Revoke object URL on unmount
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
 
-  // Avatar greets on first load (Namaste for ISL, Hello for ASL)
   useEffect(() => {
     if (greetedRef.current) return;
     greetedRef.current = true;
@@ -171,22 +154,14 @@ export default function Translator() {
     } catch { toast.error('YouTube transcription failed'); }
   };
 
-  // Scale avatar playback so it finishes when the video does, then (re)start it
   const startAvatarWithVideo = () => {
     const v = videoRef.current;
     const lastMs = glossSequence[glossSequence.length - 1]?.endMs ?? 0;
-    if (v && v.duration > 0 && lastMs > 0) {
+    if (v && v.duration > 0 && lastMs > 0)
       setPlaybackSpeed(+((lastMs / 1000) / v.duration).toFixed(3));
-    }
     setActiveGlossIdx(-1);
     setIsPlaying(false);
     setTimeout(() => { setReplayKey(k => k + 1); setIsPlaying(true); }, 30);
-  };
-  const handleVideoPlay  = () => startAvatarWithVideo();
-  const handleVideoPause = () => setIsPlaying(false);
-  const handleVideoSeeked = () => {
-    const v = videoRef.current;
-    if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
   };
 
   const handleReplay = () => {
@@ -200,25 +175,19 @@ export default function Translator() {
     setActiveGlossIdx(-1);
   }, []);
 
-  const handleDismissTip = () => {
-    setShowTip(false);
-    try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ }
-  };
-
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    if (file.size > MAX_FILE_BYTES) {
-      toast.error('File too large — max 25 MB'); return;
-    }
+    if (file.size > MAX_FILE_BYTES) { toast.error('File too large — max 25 MB'); return; }
     setFileName(file.name);
-    // Keep playable video for synced playback
-    setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return file.type.startsWith('video/') ? URL.createObjectURL(file) : null; });
+    setVideoUrl(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file.type.startsWith('video/') ? URL.createObjectURL(file) : null;
+    });
     try {
-      toast.info('Extracting audio & transcribing — this may take a moment…');
+      toast.info('Extracting audio & transcribing…');
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const audioBase64 = bytesToBase64(bytes);
       const { text } = await fileMutation.mutateAsync({
-        audioBase64,
+        audioBase64: bytesToBase64(bytes),
         mimeType: file.type || 'video/mp4',
         language: 'en',
       });
@@ -227,9 +196,7 @@ export default function Translator() {
       const result = await textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' });
       applyResult(result.glossSequence);
       toast.success('File translated!');
-    } catch {
-      toast.error('Failed to process file');
-    }
+    } catch { toast.error('Failed to process file'); }
   };
 
   const totalDurationS = glossSequence.length > 0
@@ -246,143 +213,159 @@ export default function Translator() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
+    <div className="space-y-5 max-w-2xl mx-auto">
+      {/* Page title */}
+      <div className="space-y-0.5">
         <h1 className="text-2xl sm:text-3xl font-bold">Sign Language Translator</h1>
-        <p className="text-muted-foreground">Convert text, speech, or YouTube videos to sign language</p>
+        <p className="text-muted-foreground text-sm">Convert text, speech, or YouTube videos to sign language</p>
       </div>
 
-      {showTip && <OnboardingTip onDismiss={handleDismissTip} />}
+      {showTip && (
+        <OnboardingTip onDismiss={() => {
+          setShowTip(false);
+          try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ }
+        }} />
+      )}
 
-      {/* Top: Avatar (left) + Video (right) */}
-      <div className="grid lg:grid-cols-2 gap-8 items-start">
-        {/* ── Left: Avatar Panel ── */}
-        <div className="space-y-4">
-          <Card className="p-5 space-y-4">
-            <div className="h-72 sm:h-96 rounded-lg overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-              {glossSequence.length > 0 || isPending ? (
-                <SignAvatar
-                  key={replayKey}
-                  glossSequence={glossSequence}
-                  isPlaying={isPlaying}
-                  playbackSpeed={playbackSpeed}
-                  language={language}
-                  onGlossChange={setActiveGlossIdx}
-                  onAnimationComplete={handleAnimationComplete}
-                />
-              ) : (
-                <AvatarIdleState />
+      {/* ── Avatar canvas ── */}
+      <Card className="overflow-hidden rounded-2xl border shadow-sm">
+        {/* 3D canvas */}
+        <div className="relative h-72 sm:h-96 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+          {(glossSequence.length > 0 || isPending) ? (
+            <SignAvatar
+              key={replayKey}
+              glossSequence={glossSequence}
+              isPlaying={isPlaying}
+              playbackSpeed={playbackSpeed}
+              language={language}
+              onGlossChange={setActiveGlossIdx}
+              onAnimationComplete={handleAnimationComplete}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <span className="text-3xl">🤟</span>
+              </div>
+              <div className="space-y-1">
+                <p className="font-semibold text-foreground">Avatar ready</p>
+                <p className="text-sm text-muted-foreground">Translate something to see it signed</p>
+              </div>
+            </div>
+          )}
+
+          {/* Active gloss overlay */}
+          {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+            <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
+              <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                {glossSequence[activeGlossIdx].gloss}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Playback controls */}
+        <div className="p-4 space-y-3 border-t border-border/50">
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setIsPlaying(p => !p)}
+              variant="outline" className="flex-1 h-9"
+              disabled={glossSequence.length === 0}
+            >
+              {isPlaying
+                ? <><Pause className="w-4 h-4 mr-2" />Pause</>
+                : <><Play  className="w-4 h-4 mr-2" />Play</>}
+            </Button>
+            <Button
+              variant="outline" className="flex-1 h-9"
+              onClick={handleReplay}
+              disabled={glossSequence.length === 0}
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />Replay
+            </Button>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
+            </div>
+            <Slider
+              min={0.5} max={2} step={0.1}
+              value={[playbackSpeed]}
+              onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
+            />
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>0.5×</span><span>2×</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Gloss sequence ── */}
+      {glossSequence.length > 0 && (
+        <Card className="p-4 rounded-2xl space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Gloss Sequence</h3>
+            <span className="text-xs text-muted-foreground">
+              {glossSequence.length} signs · {totalDurationS}s
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {glossSequence.map((g, idx) => (
+              <div
+                key={idx}
+                className={cn(
+                  'px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-all duration-200',
+                  idx === activeGlossIdx
+                    ? 'bg-primary text-primary-foreground border-primary scale-110 shadow-sm'
+                    : 'bg-primary/10 text-primary border-primary/20'
+                )}
+              >
+                {g.gloss}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Video panel (only when a video is uploaded) ── */}
+      {videoUrl && (
+        <Card className="rounded-2xl overflow-hidden">
+          <div className="p-4 pb-0 flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Uploaded Video</h3>
+            <span className="text-xs text-muted-foreground">Plays in sync with avatar</span>
+          </div>
+          <div className="p-4 space-y-2">
+            <div className="relative rounded-xl overflow-hidden bg-black">
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                playsInline
+                className="w-full max-h-64 object-contain bg-black"
+                onPlay={startAvatarWithVideo}
+                onPause={() => setIsPlaying(false)}
+                onSeeked={() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
+                }}
+              />
+              {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+                <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none">
+                  <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                    {glossSequence[activeGlossIdx].gloss}
+                  </span>
+                </div>
               )}
             </div>
+            <p className="text-xs text-muted-foreground">Press play on the video — the avatar signs along with it.</p>
+          </div>
+        </Card>
+      )}
 
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => setIsPlaying(p => !p)}
-                  variant="outline" className="flex-1"
-                  disabled={glossSequence.length === 0}
-                >
-                  {isPlaying
-                    ? <><Pause className="w-4 h-4 mr-2" />Pause</>
-                    : <><Play  className="w-4 h-4 mr-2" />Play</>
-                  }
-                </Button>
-                <Button variant="outline" className="flex-1" onClick={handleReplay} disabled={glossSequence.length === 0}>
-                  <RotateCcw className="w-4 h-4 mr-2" />Replay
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
-                </div>
-                <Slider
-                  min={0.5} max={2} step={0.1}
-                  value={[playbackSpeed]}
-                  onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>0.5×</span><span>2×</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {glossSequence.length > 0 && (
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Gloss Sequence</h3>
-                <span className="text-xs text-muted-foreground">
-                  {glossSequence.length} signs · {totalDurationS}s
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {glossSequence.map((g, idx) => (
-                  <div
-                    key={idx}
-                    className={cn(
-                      'px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-200',
-                      idx === activeGlossIdx
-                        ? 'bg-primary text-primary-foreground border-primary scale-110 shadow-sm'
-                        : 'bg-primary/10 text-primary border-primary/20'
-                    )}
-                  >
-                    {g.gloss}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-        </div>
-
-        {/* ── Right: Video Panel ── */}
-        <div className="space-y-4">
-          {videoUrl ? (
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Uploaded Video</h3>
-                <span className="text-xs text-muted-foreground">Plays in sync with the avatar</span>
-              </div>
-              <div className="relative rounded-lg overflow-hidden bg-black">
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  controls
-                  playsInline
-                  className="w-full max-h-[26rem] object-contain bg-black"
-                  onPlay={handleVideoPlay}
-                  onPause={handleVideoPause}
-                  onSeeked={handleVideoSeeked}
-                />
-                {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
-                  <div className="absolute bottom-12 left-0 right-0 flex justify-center pointer-events-none">
-                    <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
-                      {glossSequence[activeGlossIdx].gloss}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Press play on the video — the avatar signs along with it.
-              </p>
-            </Card>
-          ) : (
-            <Card className="p-5">
-              <div className="h-72 sm:h-96 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center gap-3 text-center px-6">
-                <FileVideo className="w-9 h-9 text-muted-foreground" />
-                <p className="text-sm font-medium text-foreground">No video uploaded</p>
-                <p className="text-xs text-muted-foreground">
-                  Use the <span className="font-medium text-foreground">Upload</span> tab below to add a video — it plays here in sync with the avatar.
-                </p>
-              </div>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      {/* Below: Input section */}
-      <div className="space-y-4">
-        <Card className="p-5 space-y-3">
+      {/* ── Input section ── */}
+      <div className="space-y-3">
+        {/* Language selector */}
+        <Card className="p-4 rounded-2xl space-y-2.5">
           <label className="text-sm font-semibold">Sign Language</label>
           <div className="flex gap-2">
             {(['ASL', 'ISL'] as const).map(lang => (
@@ -402,155 +385,153 @@ export default function Translator() {
           </div>
         </Card>
 
-        <Card className="p-5 space-y-4">
-            <div className="flex gap-1 p-1 rounded-lg bg-muted">
-              {TABS.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setInputTab(tab.id)}
-                  className={cn(
-                    'flex-1 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    inputTab === tab.id
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
+        {/* Input tabs */}
+        <Card className="p-4 rounded-2xl space-y-4">
+          <div className="flex gap-1 p-1 rounded-lg bg-muted">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setInputTab(tab.id)}
+                className={cn(
+                  'flex-1 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  inputTab === tab.id
+                    ? 'bg-background shadow-sm text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {inputTab === 'text' && (
+            <div className="space-y-3">
+              <AIInput
+                value={inputText}
+                onChange={setInputText}
+                onSubmit={() => handleTranslate()}
+                onMic={() => setInputTab('voice')}
+                disabled={isPending}
+                placeholder="Type something to translate…"
+                minHeight={64}
+                maxHeight={200}
+              />
+              <Button onClick={handleTranslate} disabled={isPending || !inputText.trim()} className="w-full">
+                {textToSignMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Translate to Sign
+              </Button>
             </div>
+          )}
 
-            {inputTab === 'text' && (
-              <div className="space-y-3">
-                <AIInput
-                  value={inputText}
-                  onChange={setInputText}
-                  onSubmit={() => handleTranslate()}
-                  onMic={() => setInputTab('voice')}
+          {inputTab === 'voice' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">Record your voice — auto-transcribed and translated.</p>
+              <AudioRecorder
+                language="en"
+                disabled={isPending}
+                onTranscript={text => {
+                  setInputText(text);
+                  setInputTab('text');
+                  setTimeout(() => {
+                    if (text.trim()) {
+                      textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' })
+                        .then(r => { applyResult(r.glossSequence); toast.success('Voice translated!'); })
+                        .catch(() => toast.error('Failed to translate voice input'));
+                    }
+                  }, 50);
+                }}
+                onError={msg => toast.error(msg)}
+              />
+            </div>
+          )}
+
+          {inputTab === 'file' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Upload a video or audio file — audio extracted, transcribed, and signed.
+              </p>
+              <label
+                className={cn(
+                  'flex flex-col items-center justify-center gap-2 w-full rounded-xl border-2 border-dashed border-border px-4 py-8 text-center transition-colors',
+                  isPending ? 'opacity-60 pointer-events-none' : 'cursor-pointer hover:border-primary/50 hover:bg-primary/5'
+                )}
+              >
+                <input
+                  type="file"
+                  accept="video/*,audio/*"
+                  className="hidden"
                   disabled={isPending}
-                  placeholder="Type something to translate…  (Enter to translate, Shift+Enter for newline)"
-                  minHeight={64}
-                  maxHeight={200}
+                  onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
                 />
-                <Button onClick={handleTranslate} disabled={isPending || !inputText.trim()} className="w-full">
-                  {textToSignMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Translate to Sign
-                </Button>
-              </div>
-            )}
+                {fileMutation.isPending
+                  ? <Loader2 className="w-7 h-7 text-primary animate-spin" />
+                  : <Upload className="w-7 h-7 text-muted-foreground" />}
+                <span className="text-sm font-medium text-foreground">
+                  {fileMutation.isPending ? 'Processing…' : 'Click to choose a file'}
+                </span>
+                <span className="text-xs text-muted-foreground">MP4, MOV, WEBM, MP3, WAV · max 25 MB</span>
+              </label>
+              {fileName && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <FileVideo className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{fileName}</span>
+                </div>
+              )}
+            </div>
+          )}
 
-            {inputTab === 'voice' && (
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Record your voice — auto-transcribed and translated.
-                </p>
-                <AudioRecorder
-                  language="en"
+          {inputTab === 'youtube' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Paste a YouTube URL — audio extracted, transcribed, and signed.
+              </p>
+              <div className="relative w-full">
+                <Youtube className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="url"
+                  value={youtubeUrl}
+                  onChange={e => setYoutubeUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleYoutube(); }}
                   disabled={isPending}
-                  onTranscript={text => {
-                    setInputText(text);
-                    setInputTab('text');
-                    setTimeout(() => {
-                      if (text.trim()) {
-                        textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' }).then(result => {
-                          applyResult(result.glossSequence);
-                          toast.success('Voice translated!');
-                        }).catch(() => toast.error('Failed to translate voice input'));
-                      }
-                    }, 50);
-                  }}
-                  onError={msg => toast.error(msg)}
-                />
-              </div>
-            )}
-
-            {inputTab === 'file' && (
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Upload a video or audio file from your device — audio extracted, transcribed, and signed.
-                </p>
-                <label
+                  placeholder="https://youtube.com/watch?v=…"
                   className={cn(
-                    'flex flex-col items-center justify-center gap-2 w-full rounded-xl border-2 border-dashed border-border px-4 py-8 text-center transition-colors',
-                    isPending ? 'opacity-60 pointer-events-none' : 'cursor-pointer hover:border-primary/50 hover:bg-primary/5'
+                    'w-full h-12 rounded-2xl bg-muted/60 border border-border',
+                    'pl-11 pr-14 text-sm text-foreground placeholder:text-muted-foreground',
+                    'outline-none transition-[box-shadow,border-color] duration-150',
+                    'focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary/50',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={handleYoutube}
+                  disabled={isPending || !youtubeUrl.trim()}
+                  aria-label="Translate YouTube video"
+                  className={cn(
+                    'absolute top-1/2 -translate-y-1/2 right-3 flex items-center justify-center',
+                    'h-8 w-8 rounded-xl bg-primary text-primary-foreground shadow-sm',
+                    'transition-all duration-200 hover:opacity-90',
+                    youtubeUrl.trim() ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
                   )}
                 >
-                  <input
-                    type="file"
-                    accept="video/*,audio/*"
-                    className="hidden"
-                    disabled={isPending}
-                    onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
-                  />
-                  {fileMutation.isPending
-                    ? <Loader2 className="w-7 h-7 text-primary animate-spin" />
-                    : <Upload className="w-7 h-7 text-muted-foreground" />}
-                  <span className="text-sm font-medium text-foreground">
-                    {fileMutation.isPending ? 'Processing…' : 'Click to choose a file'}
-                  </span>
-                  <span className="text-xs text-muted-foreground">MP4, MOV, WEBM, MP3, WAV · max 25 MB</span>
-                </label>
-                {fileName && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <FileVideo className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{fileName}</span>
-                  </div>
-                )}
+                  {youtubeMutation.isPending
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <CornerRightUp className="w-4 h-4" />}
+                </button>
               </div>
-            )}
-
-            {inputTab === 'youtube' && (
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Paste a YouTube URL — audio extracted, transcribed, and signed.
+              <Button onClick={handleYoutube} disabled={isPending || !youtubeUrl.trim()} className="w-full">
+                {youtubeMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {youtubeMutation.isPending ? 'Processing…' : 'Translate YouTube Video'}
+              </Button>
+              {youtubeMutation.isPending && (
+                <p className="text-xs text-muted-foreground text-center animate-pulse">
+                  Downloading audio and transcribing — may take 30–60 seconds…
                 </p>
-                <div className="relative w-full">
-                  <Youtube className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="url"
-                    value={youtubeUrl}
-                    onChange={e => setYoutubeUrl(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') handleYoutube(); }}
-                    disabled={isPending}
-                    placeholder="https://youtube.com/watch?v=…"
-                    className={cn(
-                      'w-full h-14 rounded-2xl bg-muted/60 border border-border',
-                      'pl-11 pr-14 text-sm text-foreground placeholder:text-muted-foreground',
-                      'outline-none transition-[box-shadow,border-color] duration-150',
-                      'focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary/50',
-                      'disabled:opacity-50 disabled:cursor-not-allowed'
-                    )}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleYoutube}
-                    disabled={isPending || !youtubeUrl.trim()}
-                    aria-label="Translate YouTube video"
-                    className={cn(
-                      'absolute top-1/2 -translate-y-1/2 right-3 flex items-center justify-center',
-                      'h-9 w-9 rounded-xl bg-primary text-primary-foreground shadow-sm',
-                      'transition-all duration-200 hover:opacity-90',
-                      youtubeUrl.trim() ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
-                    )}
-                  >
-                    {youtubeMutation.isPending
-                      ? <Loader2 className="w-4 h-4 animate-spin" />
-                      : <CornerRightUp className="w-4 h-4" />}
-                  </button>
-                </div>
-                <Button onClick={handleYoutube} disabled={isPending || !youtubeUrl.trim()} className="w-full">
-                  {youtubeMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  {youtubeMutation.isPending ? 'Processing…' : 'Translate YouTube Video'}
-                </Button>
-                {youtubeMutation.isPending && (
-                  <p className="text-xs text-muted-foreground text-center animate-pulse">
-                    Downloading audio and transcribing — may take 30–60 seconds…
-                  </p>
-                )}
-              </div>
-            )}
-          </Card>
-        </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

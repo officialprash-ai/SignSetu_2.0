@@ -66,7 +66,7 @@ export type TranscriptionError = {
 
 /**
  * Transcribe audio to text using the internal Speech-to-Text service
- * 
+ *
  * @param options - Audio data and metadata
  * @returns Transcription result or error
  */
@@ -75,18 +75,11 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResponse | TranscriptionError> {
   try {
     // Step 1: Validate environment configuration
-    if (!ENV.forgeApiUrl) {
-      return {
-        error: "Voice transcription service is not configured",
-        code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_URL is not set"
-      };
-    }
     if (!ENV.forgeApiKey) {
       return {
-        error: "Voice transcription service authentication is missing",
+        error: "Transcription API key is not configured",
         code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_KEY is not set"
+        details: "Set OPENAI_API_KEY (or BUILT_IN_FORGE_API_KEY) in your environment variables"
       };
     }
 
@@ -102,10 +95,10 @@ export async function transcribeAudio(
           details: `HTTP ${response.status}: ${response.statusText}`
         };
       }
-      
+
       audioBuffer = Buffer.from(await response.arrayBuffer());
       mimeType = response.headers.get('content-type') || 'audio/mpeg';
-      
+
       // Check file size (16MB limit)
       const sizeMB = audioBuffer.length / (1024 * 1024);
       if (sizeMB > 16) {
@@ -123,34 +116,86 @@ export async function transcribeAudio(
       };
     }
 
-    // Step 3: Create FormData for multipart upload to Whisper API
+    return callWhisper(audioBuffer, mimeType, options);
+  } catch (error) {
+    return {
+      error: "Voice transcription failed",
+      code: "SERVICE_ERROR",
+      details: error instanceof Error ? error.message : "An unexpected error occurred"
+    };
+  }
+}
+
+/**
+ * Transcribe audio directly from a Buffer (no upload/download round-trip needed).
+ *
+ * @param audioBuffer - Raw audio/video bytes
+ * @param mimeType    - MIME type, e.g. "audio/webm" or "video/mp4"
+ * @param opts        - Optional language / prompt hints
+ */
+export async function transcribeAudioBuffer(
+  audioBuffer: Buffer,
+  mimeType: string,
+  opts?: { language?: string; prompt?: string }
+): Promise<TranscriptionResponse | TranscriptionError> {
+  if (!ENV.forgeApiKey) {
+    return {
+      error: "Transcription API key is not configured",
+      code: "SERVICE_ERROR",
+      details: "Set OPENAI_API_KEY (or BUILT_IN_FORGE_API_KEY) in your environment variables"
+    };
+  }
+
+  const sizeMB = audioBuffer.length / (1024 * 1024);
+  if (sizeMB > 25) {
+    return {
+      error: "Audio file exceeds maximum size limit",
+      code: "FILE_TOO_LARGE",
+      details: `File size is ${sizeMB.toFixed(2)}MB, maximum allowed is 25MB`
+    };
+  }
+
+  return callWhisper(audioBuffer, mimeType, opts);
+}
+
+/** Shared Whisper API call used by both transcribeAudio and transcribeAudioBuffer */
+async function callWhisper(
+  audioBuffer: Buffer,
+  mimeType: string,
+  opts?: { language?: string; prompt?: string }
+): Promise<TranscriptionResponse | TranscriptionError> {
+  try {
+    // Build FormData for multipart upload to Whisper API
     const formData = new FormData();
-    
+
     // Create a Blob from the buffer and append to form
     const filename = `audio.${getFileExtension(mimeType)}`;
     const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
     formData.append("file", audioBlob, filename);
     
-    formData.append("model", "whisper-1");
+    // whisper-large-v3-turbo on Groq; falls back gracefully on OpenAI (whisper-1 alias not needed there)
+    const model = ENV.forgeApiUrl.includes("groq.com") ? "whisper-large-v3-turbo" : "whisper-1";
+    formData.append("model", model);
     formData.append("response_format", "verbose_json");
-    
-    // Add prompt - use custom prompt if provided, otherwise generate based on language
-    const prompt = options.prompt || (
-      options.language 
-        ? `Transcribe the user's voice to text, the user's working language is ${getLanguageName(options.language)}`
+
+    // Add prompt — use custom prompt if provided, otherwise hint the language
+    const prompt = opts?.prompt || (
+      opts?.language
+        ? `Transcribe the user's voice to text, the user's working language is ${getLanguageName(opts.language)}`
         : "Transcribe the user's voice to text"
     );
     formData.append("prompt", prompt);
 
-    // Step 4: Call the transcription service
+    if (opts?.language) {
+      formData.append("language", opts.language);
+    }
+
+    // Call the transcription service
     const baseUrl = ENV.forgeApiUrl.endsWith("/")
       ? ENV.forgeApiUrl
       : `${ENV.forgeApiUrl}/`;
-    
-    const fullUrl = new URL(
-      "v1/audio/transcriptions",
-      baseUrl
-    ).toString();
+
+    const fullUrl = new URL("v1/audio/transcriptions", baseUrl).toString();
 
     const response = await fetch(fullUrl, {
       method: "POST",
@@ -170,10 +215,9 @@ export async function transcribeAudio(
       };
     }
 
-    // Step 5: Parse and return the transcription result
+    // Parse and return the transcription result
     const whisperResponse = await response.json() as WhisperResponse;
-    
-    // Validate response structure
+
     if (!whisperResponse.text || typeof whisperResponse.text !== 'string') {
       return {
         error: "Invalid transcription response",
@@ -182,10 +226,9 @@ export async function transcribeAudio(
       };
     }
 
-    return whisperResponse; // Return native Whisper API response directly
+    return whisperResponse;
 
   } catch (error) {
-    // Handle unexpected errors
     return {
       error: "Voice transcription failed",
       code: "SERVICE_ERROR",
@@ -282,3 +325,4 @@ function getLanguageName(langCode: string): string {
  * });
  * ```
  */
+                                                                                                                                               

@@ -1,6 +1,6 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, count, gte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, translations, signDictionary, sessionHistory, userPreferences, fingerspellingAlphabet } from "../drizzle/schema";
+import { InsertUser, InsertSignDictionary, users, translations, signDictionary, sessionHistory, userPreferences, fingerspellingAlphabet } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -209,4 +209,56 @@ export async function getTranslationById(translationId: number) {
     .limit(1);
 
   return result.length > 0 ? result[0] : null;
+}
+
+export async function seedDictionary(signs: InsertSignDictionary[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (signs.length === 0) return { inserted: 0 };
+  await db.insert(signDictionary).values(signs).onDuplicateKeyUpdate({
+    set: {
+      poseUrl:  sql`VALUES(poseUrl)`,
+      videoUrl: sql`VALUES(videoUrl)`,
+      duration: sql`VALUES(duration)`,
+      category: sql`VALUES(category)`,
+      priority: sql`VALUES(priority)`,
+    }
+  });
+  return { inserted: signs.length };
+}
+
+export async function getStatsOverview() {
+  const db = await getDb();
+  if (!db) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [totalUsersRes, totalTranslationsRes, todayTranslationsRes] = await Promise.all([
+    db.select({ value: count() }).from(users),
+    db.select({ value: count() }).from(translations),
+    db.select({ value: count() }).from(translations).where(gte(translations.createdAt, today)),
+  ]);
+  return {
+    totalUsers:         totalUsersRes[0].value,
+    totalTranslations:  totalTranslationsRes[0].value,
+    todayTranslations:  todayTranslationsRes[0].value,
+  };
+}
+
+export async function getTopGlosses(limit: number = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const recent = await db.select({ glossSequence: translations.glossSequence, language: translations.language })
+    .from(translations).where(gte(translations.createdAt, thirtyDaysAgo)).limit(1000);
+  const counts: Record<string, number> = {};
+  for (const row of recent) {
+    try {
+      const gl: string[] = JSON.parse(row.glossSequence);
+      if (Array.isArray(gl)) for (const g of gl) { const k = `${row.language}:${g}`; counts[k] = (counts[k] || 0) + 1; }
+    } catch { /* ignore */ }
+  }
+  return Object.entries(counts)
+    .map(([key, c]) => { const [language, gloss] = key.split(':'); return { language, gloss, count: c }; })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
 }
