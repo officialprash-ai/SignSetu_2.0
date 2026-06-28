@@ -8,5 +8,5 @@ export const ENV = {
   // Whisper / transcription — defaults to Groq (fastest + cheapest Whisper hosting).
   // Set GROQ_API_KEY for free transcription. Falls back to OpenAI if not set.
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL || "https://api.groq.com/openai/",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? process.env.GROQ_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY || process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || "",
 };

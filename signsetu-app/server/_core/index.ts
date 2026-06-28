@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { ENV } from "./env";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
@@ -60,6 +61,7 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    console.log(`[ENV] forgeApiKey set: ${!!ENV.forgeApiKey} | GROQ_API_KEY raw: ${process.env.GROQ_API_KEY ? 'present' : 'MISSING'} | BUILT_IN_FORGE_API_KEY raw: ${process.env.BUILT_IN_FORGE_API_KEY ? 'present' : 'not set'}`);
   });
 }
 
