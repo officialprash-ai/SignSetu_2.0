@@ -1,19 +1,27 @@
 /**
- * AudioRecorder — browser microphone capture → base64 → tRPC voice.transcribe
+ * AudioRecorder — uses the browser's native Web Speech API.
+ * No server API key required. Works in Chrome and Edge.
  *
  * Props:
- *   onTranscript(text)  called when Whisper returns a result
+ *   onTranscript(text)  called with the final recognised text
  *   onError(msg)        called on any failure
- *   language            optional ISO code hint for Whisper (e.g. "en")
+ *   language            optional BCP-47 code, e.g. "en-US"
  *   disabled            prevent recording while translation is in progress
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Mic, MicOff, Square } from 'lucide-react';
+import { Loader2, Mic, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
-type RecordingState = 'idle' | 'recording' | 'processing';
+// Augment window for webkit prefix
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
+type RecordingState = 'idle' | 'recording' | 'finishing';
 
 interface AudioRecorderProps {
   onTranscript: (text: string) => void;
@@ -26,152 +34,143 @@ interface AudioRecorderProps {
 export function AudioRecorder({
   onTranscript,
   onError,
-  language,
+  language = 'en',
   disabled = false,
   className,
 }: AudioRecorderProps) {
-  const [state, setState] = useState<RecordingState>('idle');
-  const [seconds, setSeconds] = useState(0);
+  const [state, setState]           = useState<RecordingState>('idle');
+  const [seconds, setSeconds]       = useState(0);
+  const [liveText, setLiveText]     = useState('');
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef        = useRef<Blob[]>([]);
-  const timerRef         = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamRef        = useRef<MediaStream | null>(null);
+  const recognitionRef  = useRef<SpeechRecognition | null>(null);
+  const timerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finalRef        = useRef('');        // accumulates final segments
 
-  const transcribeMutation = trpc.voice.transcribe.useMutation();
+  // Detect support once
+  const SpeechAPI =
+    typeof window !== 'undefined'
+      ? window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null
+      : null;
 
-  // ── Cleanup on unmount ──────────────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      stopTimer();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-      }
-    };
-  }, []);
-
-  // ── Timer helpers ───────────────────────────────────────────────────────────
+  // ── Timer helpers ─────────────────────────────────────────────────────────
   function startTimer() {
     setSeconds(0);
     timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
   }
   function stopTimer() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }
 
-  // ── Start recording ─────────────────────────────────────────────────────────
-  const startRecording = useCallback(async () => {
-    if (disabled) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // Pick the best supported MIME type
-      const mimeType = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-      ].find(t => MediaRecorder.isTypeSupported(t)) ?? '';
-
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = e => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stopTimer();
-        streamRef.current?.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-
-        const blob = new Blob(chunksRef.current, {
-          type: recorder.mimeType || 'audio/webm',
-        });
-
-        if (blob.size < 1000) {
-          onError?.('Recording was too short — please try again.');
-          setState('idle');
-          return;
-        }
-
-        setState('processing');
-
-        // Convert blob → base64
-        const arrayBuf   = await blob.arrayBuffer();
-        const uint8      = new Uint8Array(arrayBuf);
-        const binary     = uint8.reduce((s, b) => s + String.fromCharCode(b), '');
-        const audioBase64 = btoa(binary);
-
-        try {
-          const result = await transcribeMutation.mutateAsync({
-            audioBase64,
-            mimeType: recorder.mimeType || 'audio/webm',
-            language,
-          });
-          onTranscript(result.text);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Transcription failed';
-          onError?.(msg);
-        } finally {
-          setState('idle');
-        }
-      };
-
-      recorder.start(250); // collect in 250ms chunks
-      setState('recording');
-      startTimer();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Microphone access denied';
-      onError?.(msg);
-    }
-  }, [disabled, language, onError, onTranscript, transcribeMutation]);
-
-  // ── Stop recording ──────────────────────────────────────────────────────────
-  const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop();
+  // ── Cleanup on unmount ───────────────────────────────────────────────────
+  useEffect(() => () => {
+    recognitionRef.current?.abort();
+    stopTimer();
   }, []);
 
-  // ── UI ───────────────────────────────────────────────────────────────────────
-  const isIdle       = state === 'idle';
+  // ── Start ─────────────────────────────────────────────────────────────────
+  const startRecording = useCallback(() => {
+    if (disabled || !SpeechAPI) return;
+
+    const recognition = new SpeechAPI();
+    recognition.lang             = language.includes('-') ? language : `${language}-US`;
+    recognition.continuous       = true;
+    recognition.interimResults   = true;
+    recognition.maxAlternatives  = 1;
+    finalRef.current             = '';
+
+    recognition.onresult = event => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalRef.current += t + ' ';
+        else interim = t;
+      }
+      setLiveText(finalRef.current + interim);
+    };
+
+    recognition.onerror = event => {
+      // 'no-speech' is benign — just stop quietly
+      if (event.error !== 'no-speech') {
+        onError?.(`Mic error: ${event.error}`);
+      }
+      stopTimer();
+      setState('idle');
+      setLiveText('');
+    };
+
+    recognition.onend = () => {
+      stopTimer();
+      setState('finishing');
+      const text = finalRef.current.trim();
+      if (text) {
+        onTranscript(text);
+      } else {
+        onError?.('No speech detected — please try again.');
+      }
+      setLiveText('');
+      // small delay so "Finishing…" is visible
+      setTimeout(() => setState('idle'), 400);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setState('recording');
+    startTimer();
+  }, [SpeechAPI, disabled, language, onError, onTranscript]);
+
+  // ── Stop ──────────────────────────────────────────────────────────────────
+  const stopRecording = useCallback(() => {
+    recognitionRef.current?.stop();
+    stopTimer();
+  }, []);
+
+  // ── Unsupported browser fallback ──────────────────────────────────────────
+  if (!SpeechAPI) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 text-center">
+        Voice recording requires <strong>Chrome</strong> or <strong>Edge</strong>.
+        Firefox does not support the Web Speech API.
+      </div>
+    );
+  }
+
   const isRecording  = state === 'recording';
-  const isProcessing = state === 'processing';
+  const isFinishing  = state === 'finishing';
 
   return (
-    <div className={cn('flex items-center gap-2', className)}>
+    <div className={cn('space-y-2.5', className)}>
       <Button
         type="button"
         variant={isRecording ? 'destructive' : 'outline'}
         size="sm"
         className={cn(
-          'gap-2 transition-all',
+          'gap-2 w-full h-10 transition-all',
           isRecording && 'animate-pulse',
           disabled && 'opacity-50 cursor-not-allowed'
         )}
-        disabled={disabled || isProcessing}
+        disabled={disabled || isFinishing}
         onClick={isRecording ? stopRecording : startRecording}
       >
-        {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
+        {isFinishing && <Loader2 className="w-4 h-4 animate-spin" />}
         {isRecording  && <Square className="w-4 h-4" />}
-        {isIdle       && <Mic    className="w-4 h-4" />}
-        {isIdle       && 'Record'}
-        {isRecording  && `Stop  ${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`}
-        {isProcessing && 'Transcribing…'}
+        {state === 'idle' && <Mic className="w-4 h-4" />}
+
+        {state === 'idle' && 'Start Recording'}
+        {isRecording && `Stop  ${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`}
+        {isFinishing && 'Finishing…'}
       </Button>
 
-      {isIdle && !isProcessing && (
-        <span className="text-xs text-muted-foreground hidden sm:inline">
-          Speak, then stop to transcribe
-        </span>
+      {/* Live transcript preview */}
+      {liveText && (
+        <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground min-h-[2.5rem] italic">
+          {liveText}
+        </div>
       )}
 
-      {!isRecording && !isProcessing && (
-        <MicOff className="w-3.5 h-3.5 text-muted-foreground/40 hidden sm:block" />
+      {!isRecording && state === 'idle' && (
+        <p className="text-xs text-muted-foreground text-center">
+          Speak clearly · results appear live · no API key needed
+        </p>
       )}
     </div>
   );
