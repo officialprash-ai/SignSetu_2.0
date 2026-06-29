@@ -265,8 +265,8 @@ export default function Translator() {
 
         {/*
           Canvas layout:
-            Mobile  → flex-col:  video TOP,  avatar BOTTOM
-            Desktop → flex-row:  avatar LEFT, video RIGHT
+            Mobile  -> flex-col:  video TOP,  avatar BOTTOM
+            Desktop -> flex-row:  avatar LEFT, video RIGHT
           CSS order flips video/avatar position per breakpoint.
         */}
         <div className={cn(
@@ -276,7 +276,7 @@ export default function Translator() {
             : 'h-72 sm:h-96'
         )}>
 
-          {/* ── Avatar: bottom on mobile (order-2), LEFT on desktop (order-1) ── */}
+          {/* Avatar: bottom on mobile (order-2), LEFT on desktop (order-1) */}
           <div className={cn(
             'relative',
             videoUrl
@@ -323,14 +323,12 @@ export default function Translator() {
             )}
           </div>
 
-          {/* ── Video: TOP on mobile (order-1), RIGHT on desktop (order-2) ── */}
+          {/* Video: TOP on mobile (order-1), RIGHT on desktop (order-2) */}
           {videoUrl && (
             <div className={cn(
               'relative bg-black overflow-hidden',
               'order-1 sm:order-2',
-              // mobile: fixed height strip at top; desktop: flex-1 = 50% width, full height
               'flex-none h-44 sm:h-auto sm:flex-1',
-              // border: bottom separator on mobile, left separator on desktop
               'border-b border-border/20 sm:border-b-0 sm:border-l'
             )}>
               <video
@@ -379,7 +377,7 @@ export default function Translator() {
           )}
         </div>
 
-        {/* Video scrub bar — only when video loaded */}
+        {/* Video scrub bar */}
         {videoUrl && (
           <div
             className="relative w-full h-1.5 bg-muted cursor-pointer group"
@@ -397,7 +395,6 @@ export default function Translator() {
               className="absolute h-full bg-primary rounded-r-full transition-none"
               style={{ width: `${videoProgress}%` }}
             />
-            {/* Scrub handle */}
             <div
               className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-primary shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
               style={{ left: `${videoProgress}%` }}
@@ -453,7 +450,7 @@ export default function Translator() {
         </div>
       </Card>
 
-      {/* ── Gloss sequence ── */}
+      {/* Gloss sequence */}
       {glossSequence.length > 0 && (
         <Card className="p-4 rounded-2xl space-y-2.5">
           <div className="flex items-center justify-between">
@@ -480,7 +477,7 @@ export default function Translator() {
         </Card>
       )}
 
-      {/* ── Input section ── */}
+      {/* Input section */}
       <div className="space-y-3">
         {/* Language selector */}
         <Card className="p-4 rounded-2xl space-y-2.5">
