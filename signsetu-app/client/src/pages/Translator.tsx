@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import {
   Loader2, Pause, Play, RotateCcw, Youtube, X,
-  Lightbulb, Upload, FileVideo, CornerRightUp,
+  Lightbulb, Upload, FileVideo, CornerRightUp, Zap,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { SignAvatar, type GlossEntry } from '@/components/SignAvatarLazy';
@@ -63,6 +63,7 @@ export default function Translator() {
   const [replayKey, setReplayKey]         = useState(0);
   const [fileName, setFileName]           = useState('');
   const [videoUrl, setVideoUrl]           = useState<string | null>(null);
+  const [videoProgress, setVideoProgress] = useState(0);
   const videoRef                          = useRef<HTMLVideoElement | null>(null);
   const [showTip, setShowTip]             = useState(() => {
     try { return !localStorage.getItem(TIP_KEY); } catch { return true; }
@@ -164,10 +165,38 @@ export default function Translator() {
     setTimeout(() => { setReplayKey(k => k + 1); setIsPlaying(true); }, 30);
   };
 
-  const handleReplay = () => {
-    setActiveGlossIdx(-1);
+  const removeVideo = useCallback(() => {
+    const v = videoRef.current;
+    if (v) { v.pause(); v.src = ''; }
     setIsPlaying(false);
-    setTimeout(() => { setReplayKey(k => k + 1); setIsPlaying(true); }, 80);
+    setVideoProgress(0);
+    setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setFileName('');
+  }, []);
+
+  /** Play/Pause unified for video+avatar or avatar-only */
+  const handlePlayPause = () => {
+    if (videoUrl && videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();          // onPause → setIsPlaying(false)
+      } else {
+        videoRef.current.play().catch(() => {}); // onPlay → startAvatarWithVideo
+      }
+    } else {
+      setIsPlaying(p => !p);
+    }
+  };
+
+  const handleReplay = () => {
+    if (videoUrl && videoRef.current) {
+      videoRef.current.currentTime = 0;
+      setVideoProgress(0);
+      videoRef.current.play().catch(() => {}); // onPlay → startAvatarWithVideo
+    } else {
+      setActiveGlossIdx(-1);
+      setIsPlaying(false);
+      setTimeout(() => { setReplayKey(k => k + 1); setIsPlaying(true); }, 80);
+    }
   };
 
   const handleAnimationComplete = useCallback(() => {
@@ -195,7 +224,11 @@ export default function Translator() {
       setInputText(text);
       const result = await textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' });
       applyResult(result.glossSequence);
-      toast.success('File translated!');
+      // Keep avatar paused when video is present — Play button syncs both together
+      if (file.type.startsWith('video/')) {
+        setTimeout(() => setIsPlaying(false), 80);
+      }
+      toast.success('File translated! Press Play to sync video + avatar.');
     } catch { toast.error('Failed to process file'); }
   };
 
@@ -227,47 +260,134 @@ export default function Translator() {
         }} />
       )}
 
-      {/* ── Avatar canvas ── */}
+      {/* ── Avatar canvas (splits with video when uploaded) ── */}
       <Card className="overflow-hidden rounded-2xl border shadow-sm">
-        {/* 3D canvas */}
-        <div className="relative h-72 sm:h-96 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-          {(glossSequence.length > 0 || isPending) ? (
-            <SignAvatar
-              key={replayKey}
-              glossSequence={glossSequence}
-              isPlaying={isPlaying}
-              playbackSpeed={playbackSpeed}
-              language={language}
-              onGlossChange={setActiveGlossIdx}
-              onAnimationComplete={handleAnimationComplete}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
-              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
-                <span className="text-3xl">🤟</span>
+
+        {/* Canvas area: flex-row split when video present, single column otherwise */}
+        <div className={cn(
+          'relative flex bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800',
+          videoUrl ? 'flex-row h-64 sm:h-80' : 'h-72 sm:h-96'
+        )}>
+
+          {/* ── Left: Uploaded video ── */}
+          {videoUrl && (
+            <div className="relative flex-1 bg-black border-r border-border/30 overflow-hidden">
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                playsInline
+                className="w-full h-full object-contain"
+                onPlay={startAvatarWithVideo}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => { setIsPlaying(false); setVideoProgress(100); }}
+                onTimeUpdate={() => {
+                  const v = videoRef.current;
+                  if (v && v.duration > 0)
+                    setVideoProgress((v.currentTime / v.duration) * 100);
+                }}
+                onSeeked={() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
+                }}
+              />
+              {/* File name chip */}
+              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-md px-2 py-0.5 max-w-[calc(100%-2.5rem)]">
+                <FileVideo className="w-3 h-3 text-white/80 shrink-0" />
+                <span className="text-white/80 text-xs font-medium truncate">{fileName}</span>
               </div>
-              <div className="space-y-1">
-                <p className="font-semibold text-foreground">Avatar ready</p>
-                <p className="text-sm text-muted-foreground">Translate something to see it signed</p>
-              </div>
+              {/* Remove video */}
+              <button
+                onClick={removeVideo}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors"
+                aria-label="Remove video"
+              >
+                <X className="w-3 h-3" />
+              </button>
+              {/* Paused overlay hint */}
+              {!isPlaying && videoProgress === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/50 backdrop-blur-sm rounded-full w-12 h-12 flex items-center justify-center">
+                    <Play className="w-5 h-5 text-white ml-0.5" />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Active gloss overlay */}
-          {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
-            <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
-              <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
-                {glossSequence[activeGlossIdx].gloss}
-              </span>
-            </div>
-          )}
+          {/* ── Right (or full): Avatar ── */}
+          <div className={cn('relative', videoUrl ? 'flex-1' : 'w-full h-full')}>
+            {(glossSequence.length > 0 || isPending) ? (
+              <SignAvatar
+                key={replayKey}
+                glossSequence={glossSequence}
+                isPlaying={isPlaying}
+                playbackSpeed={playbackSpeed}
+                language={language}
+                onGlossChange={setActiveGlossIdx}
+                onAnimationComplete={handleAnimationComplete}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                  <span className="text-3xl">🤟</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-semibold text-foreground">Avatar ready</p>
+                  <p className="text-sm text-muted-foreground">Translate something to see it signed</p>
+                </div>
+              </div>
+            )}
+
+            {/* Active gloss badge */}
+            {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+              <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
+                <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                  {glossSequence[activeGlossIdx].gloss}
+                </span>
+              </div>
+            )}
+
+            {/* Synced badge when video present */}
+            {videoUrl && (
+              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-md px-2 py-0.5">
+                <Zap className={cn('w-3 h-3', isPlaying ? 'text-green-400' : 'text-white/50')} />
+                <span className="text-xs text-white/80 font-medium">Avatar</span>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Video scrub bar — only when video loaded */}
+        {videoUrl && (
+          <div
+            className="relative w-full h-1.5 bg-muted cursor-pointer group"
+            onClick={e => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+              const v = videoRef.current;
+              if (v && v.duration > 0) {
+                v.currentTime = pct * v.duration;
+                setVideoProgress(pct * 100);
+              }
+            }}
+          >
+            <div
+              className="absolute h-full bg-primary rounded-r-full transition-none"
+              style={{ width: `${videoProgress}%` }}
+            />
+            {/* Scrub handle */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-primary shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+              style={{ left: `${videoProgress}%` }}
+            />
+          </div>
+        )}
 
         {/* Playback controls */}
         <div className="p-4 space-y-3 border-t border-border/50">
           <div className="flex gap-2">
             <Button
-              onClick={() => setIsPlaying(p => !p)}
+              onClick={handlePlayPause}
               variant="outline" className="flex-1 h-9"
               disabled={glossSequence.length === 0}
             >
@@ -284,19 +404,30 @@ export default function Translator() {
             </Button>
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
+          {/* Speed slider — hidden when video (speed auto-calculated for sync) */}
+          {!videoUrl ? (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Speed</span><span>{playbackSpeed.toFixed(1)}×</span>
+              </div>
+              <Slider
+                min={0.5} max={2} step={0.1}
+                value={[playbackSpeed]}
+                onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>0.5×</span><span>2×</span>
+              </div>
             </div>
-            <Slider
-              min={0.5} max={2} step={0.1}
-              value={[playbackSpeed]}
-              onValueChange={([v]) => { setPlaybackSpeed(v); persistPrefs(language, v); }}
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>0.5×</span><span>2×</span>
+          ) : (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Zap className="w-3 h-3 text-primary" />
+                Speed auto-synced to video
+              </span>
+              <span className="font-medium text-foreground">{playbackSpeed.toFixed(2)}×</span>
             </div>
-          </div>
+          )}
         </div>
       </Card>
 
@@ -323,41 +454,6 @@ export default function Translator() {
                 {g.gloss}
               </div>
             ))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── Video panel (only when a video is uploaded) ── */}
-      {videoUrl && (
-        <Card className="rounded-2xl overflow-hidden">
-          <div className="p-4 pb-0 flex items-center justify-between">
-            <h3 className="font-semibold text-sm">Uploaded Video</h3>
-            <span className="text-xs text-muted-foreground">Plays in sync with avatar</span>
-          </div>
-          <div className="p-4 space-y-2">
-            <div className="relative rounded-xl overflow-hidden bg-black">
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
-                playsInline
-                className="w-full max-h-64 object-contain bg-black"
-                onPlay={startAvatarWithVideo}
-                onPause={() => setIsPlaying(false)}
-                onSeeked={() => {
-                  const v = videoRef.current;
-                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
-                }}
-              />
-              {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
-                <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none">
-                  <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
-                    {glossSequence[activeGlossIdx].gloss}
-                  </span>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">Press play on the video — the avatar signs along with it.</p>
           </div>
         </Card>
       )}
