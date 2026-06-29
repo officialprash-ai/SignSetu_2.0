@@ -263,62 +263,26 @@ export default function Translator() {
       {/* ── Avatar canvas (splits with video when uploaded) ── */}
       <Card className="overflow-hidden rounded-2xl border shadow-sm">
 
-        {/* Canvas: stacked (video top → avatar bottom) when video loaded, avatar-only otherwise */}
+        {/*
+          Canvas layout:
+            Mobile  → flex-col:  video TOP,  avatar BOTTOM
+            Desktop → flex-row:  avatar LEFT, video RIGHT
+          CSS order flips video/avatar position per breakpoint.
+        */}
         <div className={cn(
           'relative flex bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800',
-          videoUrl ? 'flex-col h-[440px] sm:h-[500px]' : 'h-72 sm:h-96'
+          videoUrl
+            ? 'flex-col sm:flex-row h-[430px] sm:h-80'
+            : 'h-72 sm:h-96'
         )}>
 
-          {/* ── TOP: Uploaded video ── */}
-          {videoUrl && (
-            <div className="relative flex-none h-44 sm:h-52 bg-black border-b border-border/20 overflow-hidden">
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                playsInline
-                className="w-full h-full object-contain"
-                onPlay={startAvatarWithVideo}
-                onPause={() => setIsPlaying(false)}
-                onEnded={() => { setIsPlaying(false); setVideoProgress(100); }}
-                onTimeUpdate={() => {
-                  const v = videoRef.current;
-                  if (v && v.duration > 0)
-                    setVideoProgress((v.currentTime / v.duration) * 100);
-                }}
-                onSeeked={() => {
-                  const v = videoRef.current;
-                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
-                }}
-              />
-
-              {/* Section label + file name */}
-              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/65 backdrop-blur-sm rounded-md px-2 py-0.5 max-w-[calc(100%-2.5rem)]">
-                <FileVideo className="w-3 h-3 text-white/80 shrink-0" />
-                <span className="text-white/80 text-xs font-medium truncate">{fileName}</span>
-              </div>
-
-              {/* Remove video */}
-              <button
-                onClick={removeVideo}
-                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/65 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/85 transition-colors"
-                aria-label="Remove video"
-              >
-                <X className="w-3 h-3" />
-              </button>
-
-              {/* Play hint overlay when not yet started */}
-              {!isPlaying && videoProgress === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-black/50 backdrop-blur-sm rounded-full w-12 h-12 flex items-center justify-center">
-                    <Play className="w-5 h-5 text-white ml-0.5" />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── BOTTOM (or full): Avatar signing ── */}
-          <div className={cn('relative', videoUrl ? 'flex-1 min-h-0' : 'w-full h-full')}>
+          {/* ── Avatar: bottom on mobile (order-2), LEFT on desktop (order-1) ── */}
+          <div className={cn(
+            'relative',
+            videoUrl
+              ? 'order-2 sm:order-1 flex-1 min-h-0'
+              : 'w-full h-full'
+          )}>
             {(glossSequence.length > 0 || isPending) ? (
               <SignAvatar
                 key={replayKey}
@@ -350,7 +314,7 @@ export default function Translator() {
               </div>
             )}
 
-            {/* Sync status badge */}
+            {/* Sync badge */}
             {videoUrl && (
               <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-md px-2 py-0.5">
                 <Zap className={cn('w-3 h-3', isPlaying ? 'text-green-400 animate-pulse' : 'text-white/40')} />
@@ -358,6 +322,61 @@ export default function Translator() {
               </div>
             )}
           </div>
+
+          {/* ── Video: TOP on mobile (order-1), RIGHT on desktop (order-2) ── */}
+          {videoUrl && (
+            <div className={cn(
+              'relative bg-black overflow-hidden',
+              'order-1 sm:order-2',
+              // mobile: fixed height strip at top; desktop: flex-1 = 50% width, full height
+              'flex-none h-44 sm:h-auto sm:flex-1',
+              // border: bottom separator on mobile, left separator on desktop
+              'border-b border-border/20 sm:border-b-0 sm:border-l'
+            )}>
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                playsInline
+                className="w-full h-full object-contain"
+                onPlay={startAvatarWithVideo}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => { setIsPlaying(false); setVideoProgress(100); }}
+                onTimeUpdate={() => {
+                  const v = videoRef.current;
+                  if (v && v.duration > 0)
+                    setVideoProgress((v.currentTime / v.duration) * 100);
+                }}
+                onSeeked={() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
+                }}
+              />
+
+              {/* File name chip */}
+              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/65 backdrop-blur-sm rounded-md px-2 py-0.5 max-w-[calc(100%-2.5rem)]">
+                <FileVideo className="w-3 h-3 text-white/80 shrink-0" />
+                <span className="text-white/80 text-xs font-medium truncate">{fileName}</span>
+              </div>
+
+              {/* Remove */}
+              <button
+                onClick={removeVideo}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/65 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/85 transition-colors"
+                aria-label="Remove video"
+              >
+                <X className="w-3 h-3" />
+              </button>
+
+              {/* Play hint */}
+              {!isPlaying && videoProgress === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/50 backdrop-blur-sm rounded-full w-12 h-12 flex items-center justify-center">
+                    <Play className="w-5 h-5 text-white ml-0.5" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Video scrub bar — only when video loaded */}
