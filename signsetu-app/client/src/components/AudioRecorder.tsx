@@ -38,21 +38,19 @@ export function AudioRecorder({
   disabled = false,
   className,
 }: AudioRecorderProps) {
-  const [state, setState]           = useState<RecordingState>('idle');
-  const [seconds, setSeconds]       = useState(0);
-  const [liveText, setLiveText]     = useState('');
+  const [state, setState]       = useState<RecordingState>('idle');
+  const [seconds, setSeconds]   = useState(0);
+  const [liveText, setLiveText] = useState('');
 
-  const recognitionRef  = useRef<SpeechRecognition | null>(null);
-  const timerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
-  const finalRef        = useRef('');        // accumulates final segments
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finalRef       = useRef('');
 
-  // Detect support once
   const SpeechAPI =
     typeof window !== 'undefined'
-      ? window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null
+      ? (window.SpeechRecognition || window.webkitSpeechRecognition || null)
       : null;
 
-  // ── Timer helpers ─────────────────────────────────────────────────────────
   function startTimer() {
     setSeconds(0);
     timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
@@ -61,22 +59,20 @@ export function AudioRecorder({
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }
 
-  // ── Cleanup on unmount ───────────────────────────────────────────────────
   useEffect(() => () => {
     recognitionRef.current?.abort();
     stopTimer();
   }, []);
 
-  // ── Start ─────────────────────────────────────────────────────────────────
   const startRecording = useCallback(() => {
     if (disabled || !SpeechAPI) return;
 
     const recognition = new SpeechAPI();
-    recognition.lang             = language.includes('-') ? language : `${language}-US`;
-    recognition.continuous       = true;
-    recognition.interimResults   = true;
-    recognition.maxAlternatives  = 1;
-    finalRef.current             = '';
+    recognition.lang            = language.includes('-') ? language : `${language}-US`;
+    recognition.continuous      = true;
+    recognition.interimResults  = true;
+    recognition.maxAlternatives = 1;
+    finalRef.current            = '';
 
     recognition.onresult = event => {
       let interim = '';
@@ -89,7 +85,6 @@ export function AudioRecorder({
     };
 
     recognition.onerror = event => {
-      // 'no-speech' is benign — just stop quietly
       if (event.error !== 'no-speech') {
         onError?.(`Mic error: ${event.error}`);
       }
@@ -108,7 +103,6 @@ export function AudioRecorder({
         onError?.('No speech detected — please try again.');
       }
       setLiveText('');
-      // small delay so "Finishing…" is visible
       setTimeout(() => setState('idle'), 400);
     };
 
@@ -118,13 +112,11 @@ export function AudioRecorder({
     startTimer();
   }, [SpeechAPI, disabled, language, onError, onTranscript]);
 
-  // ── Stop ──────────────────────────────────────────────────────────────────
   const stopRecording = useCallback(() => {
     recognitionRef.current?.stop();
     stopTimer();
   }, []);
 
-  // ── Unsupported browser fallback ──────────────────────────────────────────
   if (!SpeechAPI) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 text-center">
@@ -134,8 +126,8 @@ export function AudioRecorder({
     );
   }
 
-  const isRecording  = state === 'recording';
-  const isFinishing  = state === 'finishing';
+  const isRecording = state === 'recording';
+  const isFinishing = state === 'finishing';
 
   return (
     <div className={cn('space-y-2.5', className)}>
@@ -154,13 +146,11 @@ export function AudioRecorder({
         {isFinishing && <Loader2 className="w-4 h-4 animate-spin" />}
         {isRecording  && <Square className="w-4 h-4" />}
         {state === 'idle' && <Mic className="w-4 h-4" />}
-
         {state === 'idle' && 'Start Recording'}
         {isRecording && `Stop  ${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`}
         {isFinishing && 'Finishing…'}
       </Button>
 
-      {/* Live transcript preview */}
       {liveText && (
         <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground min-h-[2.5rem] italic">
           {liveText}
