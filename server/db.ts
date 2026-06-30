@@ -83,6 +83,14 @@ export async function getUserTranslationHistory(userId: number, limit: number = 
     .limit(limit);
 }
 
+export async function deleteUserTranslationHistory(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const res: any = await db.delete(translations).where(eq(translations.userId, userId));
+  // mysql2 returns affectedRows; fall back to 0 if unavailable
+  return res?.[0]?.affectedRows ?? res?.affectedRows ?? 0;
+}
+
 export async function getOrCreateUserPreferences(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

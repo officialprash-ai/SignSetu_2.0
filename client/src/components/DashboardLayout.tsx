@@ -1,3 +1,4 @@
+import { Logo } from "./Logo";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -75,9 +76,7 @@ export default function DashboardLayout({
       <header className="sticky top-0 z-40 h-16 border-b border-border/40 backdrop-blur-md bg-background/80">
         <div className="flex items-center justify-between h-full px-4 md:px-6">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-lg">S</span>
-            </div>
+            <Logo className="w-8 h-8 shrink-0" />
             <div className="flex flex-col leading-none">
               <span className="font-bold tracking-tight">SignSetu</span>
               <span className="text-xs text-muted-foreground mt-0.5">{activeLabel}</span>

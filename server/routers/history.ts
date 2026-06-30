@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { publicProcedure, router } from '../_core/trpc';
-import { getUserTranslationHistory } from '../db';
+import { getUserTranslationHistory, deleteUserTranslationHistory } from '../db';
 
 export const historyRouter = router({
   /**
@@ -35,6 +36,30 @@ export const historyRouter = router({
         return { items: [] };
       }
     }),
+
+  /**
+   * Permanently deletes ALL of the signed-in user's translation history.
+   */
+  clear: publicProcedure.mutation(async ({ ctx }) => {
+    const userId = (ctx as any)?.user?.id as number | undefined;
+    if (!userId) {
+      throw new TRPCError({
+        code: 'UNAUTHORIZED',
+        message: 'Sign in to manage your history',
+      });
+    }
+
+    try {
+      const deleted = await deleteUserTranslationHistory(userId);
+      return { success: true, deleted };
+    } catch (err) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to clear history',
+        cause: err,
+      });
+    }
+  }),
 });
 
 function tryParseGlosses(raw: string): string[] {

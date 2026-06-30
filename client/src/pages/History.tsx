@@ -1,9 +1,15 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Clock, Loader2, Mic, RotateCcw, Type, History as HistoryIcon } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Clock, Loader2, Mic, RotateCcw, Trash2, Type, History as HistoryIcon } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useLocation } from 'wouter';
+import { toast } from 'sonner';
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -49,8 +55,18 @@ const SAMPLES = [
 ];
 
 export default function History() {
+  const utils = trpc.useUtils();
   const { data, isLoading } = trpc.history.list.useQuery({ limit: 50 });
   const [, navigate] = useLocation();
+
+  const clearMutation = trpc.history.clear.useMutation({
+    onSuccess: async (res) => {
+      const n = res?.deleted ?? 0;
+      toast.success(n > 0 ? `Cleared ${n} translation${n !== 1 ? 's' : ''}` : 'History cleared');
+      await utils.history.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message || 'Failed to clear history'),
+  });
 
   const items    = data?.items ?? [];
   const hasReal  = items.length > 0;
@@ -60,16 +76,55 @@ export default function History() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-          <HistoryIcon className="w-6 h-6 text-primary" />
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+            <HistoryIcon className="w-6 h-6 text-primary" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
+              Translation History
+            </h1>
+            <p className="text-muted-foreground">Your recent sign language translations</p>
+          </div>
         </div>
-        <div className="space-y-1">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60">
-            Translation History
-          </h1>
-          <p className="text-muted-foreground">Your recent sign language translations</p>
-        </div>
+
+        {/* Clear history — only when the user has real saved history */}
+        {hasReal && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={clearMutation.isPending}
+                className="shrink-0 gap-2 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/40"
+              >
+                {clearMutation.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Trash2 className="w-4 h-4" />}
+                <span className="hidden sm:inline">Clear history</span>
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear all history?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently deletes all {items.length} saved translation{items.length !== 1 ? 's' : ''}.
+                  This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => clearMutation.mutate()}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete all
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
 
       {isLoading && (
@@ -82,7 +137,7 @@ export default function History() {
       {!isLoading && displayed.length === 0 && (
         <div className="flex flex-col items-center justify-center py-24 gap-5 text-center">
           <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-            <span className="text-4xl">📋</span>
+            <HistoryIcon className="w-9 h-9 text-primary" />
           </div>
           <div className="space-y-1.5 max-w-xs">
             <p className="font-semibold text-foreground text-lg">No translations yet</p>
@@ -91,7 +146,6 @@ export default function History() {
             </p>
           </div>
           <Button onClick={() => navigate('/')} className="gap-2">
-            <span>🤟</span>
             Make your first translation
           </Button>
           <p className="text-xs text-muted-foreground">
