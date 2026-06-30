@@ -51,6 +51,17 @@ const RESPONSE_SCHEMA = {
   required: ["language", "text"],
 };
 
+function normalizeMime(mimeType: string): string {
+  // Gemini rejects mime types with parameters (e.g. "audio/webm;codecs=opus").
+  // Strip everything after ";" and lower-case. Also map opus/webm to a supported type.
+  const base = (mimeType || "").split(";")[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    "audio/x-m4a": "audio/mp4",
+    "audio/mpeg": "audio/mp3",
+  };
+  return map[base] || base || "audio/mp3";
+}
+
 function requireKey(): string {
   if (!ENV.geminiApiKey) {
     throw new Error(
@@ -87,6 +98,7 @@ async function generate(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
+    console.error(`[Gemini] ${res.status} ${res.statusText} model=${ENV.geminiModel} — ${errText}`);
     throw new Error(
       `Gemini transcription failed: ${res.status} ${res.statusText}${errText ? ` — ${errText}` : ""}`
     );
@@ -126,14 +138,14 @@ export async function transcribeBufferWithGemini(
 
   if (buffer.length <= INLINE_LIMIT_BYTES) {
     const mediaPart = {
-      inline_data: { mime_type: mimeType, data: buffer.toString("base64") },
+      inline_data: { mime_type: normalizeMime(mimeType), data: buffer.toString("base64") },
     };
     return generate(mediaPart, opts);
   }
 
   // Large media → File API upload, then reference by URI.
   const fileUri = await uploadToFileApi(buffer, mimeType);
-  const mediaPart = { file_data: { mime_type: mimeType, file_uri: fileUri } };
+  const mediaPart = { file_data: { mime_type: normalizeMime(mimeType), file_uri: fileUri } };
   return generate(mediaPart, opts);
 }
 
@@ -167,7 +179,7 @@ async function uploadToFileApi(buffer: Buffer, mimeType: string): Promise<string
         "X-Goog-Upload-Protocol": "resumable",
         "X-Goog-Upload-Command": "start",
         "X-Goog-Upload-Header-Content-Length": String(numBytes),
-        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "X-Goog-Upload-Header-Content-Type": normalizeMime(mimeType),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ file: { display_name: "signsetu-media" } }),

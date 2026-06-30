@@ -36,7 +36,7 @@ export const voiceRouter = router({
       if ('error' in result) {
         throw new TRPCError({
           code:    'INTERNAL_SERVER_ERROR',
-          message: result.error,
+          message: result.details ? `${result.error}: ${result.details}` : result.error,
         });
       }
 
