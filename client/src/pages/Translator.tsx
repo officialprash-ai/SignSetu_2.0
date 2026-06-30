@@ -216,7 +216,7 @@ export default function Translator() {
   ];
 
   return (
-    <div className="space-y-5 max-w-2xl mx-auto">
+    <div className={cn('space-y-5 mx-auto transition-[max-width] duration-300', videoUrl ? 'max-w-6xl' : 'max-w-2xl')}>
       {/* Page title */}
       <div className="space-y-0.5">
         <h1 className="text-2xl sm:text-3xl font-bold">Sign Language Translator</h1>
@@ -228,6 +228,43 @@ export default function Translator() {
           setShowTip(false);
           try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ }
         }} />
+      )}
+
+      {/* ── Stage: video (left) + avatar (right) side by side on desktop ── */}
+      <div className={cn('grid gap-5', videoUrl && 'lg:grid-cols-2 lg:items-start')}>
+      {/* ── Video panel (only when a video is uploaded) ── */}
+      {videoUrl && (
+        <Card className="rounded-2xl overflow-hidden">
+          <div className="p-4 pb-0 flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Uploaded Video</h3>
+            <span className="text-xs text-muted-foreground">Plays in sync with avatar</span>
+          </div>
+          <div className="p-4 space-y-2">
+            <div className="relative rounded-xl overflow-hidden bg-black">
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                playsInline
+                className="w-full max-h-64 lg:max-h-96 object-contain bg-black"
+                onPlay={startAvatarWithVideo}
+                onPause={() => setIsPlaying(false)}
+                onSeeked={() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
+                }}
+              />
+              {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
+                <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none">
+                  <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
+                    {glossSequence[activeGlossIdx].gloss}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">Press play on the video — the avatar signs along with it.</p>
+          </div>
+        </Card>
       )}
 
       {/* ── Avatar canvas ── */}
@@ -302,6 +339,7 @@ export default function Translator() {
           </div>
         </div>
       </Card>
+      </div>
 
       {/* ── Gloss sequence ── */}
       {glossSequence.length > 0 && (
@@ -330,43 +368,8 @@ export default function Translator() {
         </Card>
       )}
 
-      {/* ── Video panel (only when a video is uploaded) ── */}
-      {videoUrl && (
-        <Card className="rounded-2xl overflow-hidden">
-          <div className="p-4 pb-0 flex items-center justify-between">
-            <h3 className="font-semibold text-sm">Uploaded Video</h3>
-            <span className="text-xs text-muted-foreground">Plays in sync with avatar</span>
-          </div>
-          <div className="p-4 space-y-2">
-            <div className="relative rounded-xl overflow-hidden bg-black">
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
-                playsInline
-                className="w-full max-h-64 object-contain bg-black"
-                onPlay={startAvatarWithVideo}
-                onPause={() => setIsPlaying(false)}
-                onSeeked={() => {
-                  const v = videoRef.current;
-                  if (v && !v.paused && v.currentTime < 0.25) startAvatarWithVideo();
-                }}
-              />
-              {activeGlossIdx >= 0 && glossSequence[activeGlossIdx] && (
-                <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none">
-                  <span className="px-3 py-1 rounded-md bg-black/70 text-white text-sm font-semibold tracking-wide">
-                    {glossSequence[activeGlossIdx].gloss}
-                  </span>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">Press play on the video — the avatar signs along with it.</p>
-          </div>
-        </Card>
-      )}
-
       {/* ── Input section ── */}
-      <div className="space-y-3">
+      <div className="space-y-3 w-full max-w-2xl mx-auto">
         {/* Language selector */}
         <Card className="p-4 rounded-2xl space-y-2.5">
           <label className="text-sm font-semibold">Sign Language</label>
