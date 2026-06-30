@@ -69,4 +69,40 @@ export function registerOAuthRoutes(app: Express) {
       res.status(500).json({ error: "OAuth callback failed" });
     }
   });
+
+  // ── DEV ONLY: instant login as a local test user (no Google needed) ──────────
+  // Active only when NODE_ENV !== "production". Visit /api/dev-login to get a
+  // session cookie, then you are redirected to "/". Remove before shipping.
+  if (!ENV.isProduction) {
+    app.get("/api/dev-login", async (req: Request, res: Response) => {
+      try {
+        const openId = "dev_local_user";
+        await db.upsertUser({
+          openId,
+          name: "Dev Tester",
+          email: "dev@local.test",
+          loginMethod: "dev",
+          lastSignedIn: new Date(),
+        });
+        const sessionToken = await sdk.createSessionToken(openId, {
+          name: "Dev Tester",
+          expiresInMs: ONE_YEAR_MS,
+        });
+        // localhost-friendly cookie (sameSite=lax, not secure) so it persists
+        // over http://localhost during local testing.
+        res.cookie(COOKIE_NAME, sessionToken, {
+          httpOnly: true,
+          path: "/",
+          sameSite: "lax",
+          secure: false,
+          maxAge: ONE_YEAR_MS,
+        });
+        res.redirect(302, "/");
+      } catch (error) {
+        console.error("[DevLogin] failed", error);
+        res.status(500).json({ error: "Dev login failed" });
+      }
+    });
+    console.log("[DevLogin] enabled at /api/dev-login (development only)");
+  }
 }

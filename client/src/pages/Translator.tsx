@@ -189,14 +189,17 @@ export default function Translator() {
       const { text } = await fileMutation.mutateAsync({
         audioBase64: bytesToBase64(bytes),
         mimeType: file.type || 'video/mp4',
-        language: 'en',
+        // language omitted — Gemini auto-detects the spoken language
       });
       if (!text.trim()) { toast.error('No speech detected in file'); return; }
       setInputText(text);
       const result = await textToSignMutation.mutateAsync({ text, language, sourceType: 'audio' });
       applyResult(result.glossSequence);
       toast.success('File translated!');
-    } catch { toast.error('Failed to process file'); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to process file';
+      toast.error(msg);
+    }
   };
 
   const totalDurationS = glossSequence.length > 0
@@ -427,7 +430,6 @@ export default function Translator() {
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">Record your voice — auto-transcribed and translated.</p>
               <AudioRecorder
-                language="en"
                 disabled={isPending}
                 onTranscript={text => {
                   setInputText(text);

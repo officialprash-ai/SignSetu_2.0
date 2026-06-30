@@ -9,6 +9,9 @@ export const ENV = {
   // Set GROQ_API_KEY for free transcription. Falls back to OpenAI if not set.
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL || "https://api.groq.com/openai/",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? process.env.GROQ_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+  // Gemini — primary speech-to-text engine. Get a key at https://aistudio.google.com/apikey
+  geminiApiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? "",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
